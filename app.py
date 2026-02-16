@@ -7547,32 +7547,6 @@ def obtener_asesores_por_user(username, default=2, cap=20):
         app.logger.warning(f"⚠️ obtener_asesores_por_user falló para user={username}: {e}")
         return default
 
-def obtener_conexion_db_VIEJA(config):
-    """Obtiene conexión a la base de datos correcta según la configuración"""
-    try:
-        if 'porfirianna' in config.get('dominio', ''):
-            # Conectar a base de datos de La Porfirianna
-            conn = mysql.connector.connect(
-                host=config.get('db_host', 'localhost'),
-                user=config.get('db_user', 'root'),
-                password=config.get('db_password', ''),
-                database=config.get('db_name', 'laporfirianna_db')
-            )
-        else:
-            # Conectar a base de datos de Mektia (por defecto)
-            conn = mysql.connector.connect(
-                host=config.get('db_host', 'localhost'),
-                user=config.get('db_user', 'root'),
-                password=config.get('db_password', ''),
-                database=config.get('db_name', 'mektia_db')
-            )
-        
-        return conn
-        
-    except Exception as e:
-        app.logger.error(f"❌ Error conectando a BD {config.get('db_name')}: {e}")
-        raise
-
 def obtener_configuracion_numero(numero_whatsapp):
     """Obtiene la configuración específica para un número de WhatsApp"""
     # Buscar en la configuración multi-tenant
