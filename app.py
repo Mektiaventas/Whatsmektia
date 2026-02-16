@@ -10917,6 +10917,211 @@ EJEMPLOS:
         app.logger.error(traceback.format_exc())
         return False
 
+def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
+    """
+    Bloque extraído de IA Total para manejo de DeepSeek y Fichas de Producto.
+    Mantiene la lógica original de cascada y detección de intención.
+    """
+    try:
+        # --- Preparar contexto y catálogo ---
+        historial = obtener_historial(numero, limite=6, config=config) or []
+        historial_text = ""
+        for h in historial:
+            if h.get('mensaje'):
+                historial_text += f"Usuario: {h.get('mensaje')}\n"
+            if h.get('respuesta'):
+                historial_text += f"Asistente: {h.get('respuesta')}\n"
+
+        # --- DeepSeek Product & Visual Intent Detection ---
+        producto_aplica = "NO_APLICA"
+        contexto_busqueda = texto 
+        contexto_ia_final = "SI_APLICA"
+        solicita_imagen_ia = False 
+
+        app.logger.info(f"🔎 Analizando intención con DeepSeek (Modo Fichas)...")
+        
+        historial_objs = obtener_historial(numero, limite=5, config=config)
+        historial_text = ""
+        for h in historial_objs:
+            msg_h = h.get('mensaje') or ""
+            resp_h = h.get('respuesta') or ""
+            if msg_h: historial_text += f"U: {msg_h}\n"
+            if resp_h: historial_text += f"A: {resp_h}\n"
+
+        ds_prompt = (
+            "Eres un vendedor experto. Tu misión es entender QUÉ busca el usuario y SI QUIERE VERLO.\n"
+            "Instrucciones:\n"
+            "1. Si el usuario busca un producto, responde: SEARCH: <término preciso>\n"
+            "2. Si la intención implica VER/RECIBIR el producto, agrega: | SHOW: YES\n"
+            "3. Si SHOW: YES, tu respuesta de texto debe ser SOLO UNA FRASE DE INTRODUCCIÓN. NO describas los productos.\n"
+            "4. Si NO hay imágenes (SHOW: NO), entonces sí explica precios y detalles.\n\n"
+            "5. SI EL USUARIO PIDE HABLAR CON UN ASESOR, HUMANO O PERSONA, responde: TRANSFERIR_ASESOR\n\n"
+            "6. SI EL USUARIO QUIERE AGENDAR UNA CITA: responde AGENDAR_CITA. Tu respuesta de texto debe ser solo: '¡Claro! Con gusto te ayudo. ¿Qué día y hora te gustaría?'\n\n"
+            "Ejemplos:\n"
+            "- U: 'muéstrame el Sainz' -> SEARCH: Escritorio Sainz | SHOW: YES\n"
+            "HISTORIAL:\n"
+            f"{historial_text.strip()}\n\n"
+            "MENSAJE ACTUAL:\n"
+            f"{texto or ''}\n"
+        )
+
+        headers_ds = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload_ds = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": ds_prompt}],
+            "temperature": 0.0,
+            "max_tokens": 100
+        }
+
+        resp_ds = requests.post(DEEPSEEK_API_URL, headers=headers_ds, json=payload_ds, timeout=8)
+        resp_ds.raise_for_status()
+        ds_data = resp_ds.json()
+        raw_ds = ds_data['choices'][0]['message']['content']
+        if isinstance(raw_ds, list):
+            raw_ds = "".join([(r.get('text') if isinstance(r, dict) else str(r)) for r in raw_ds])
+        raw_ds = (raw_ds or "").strip()
+        raw_upper = raw_ds.upper() 
+
+        if "SEARCH:" in raw_ds:
+            producto_aplica = "SI_APLICA"
+            try:
+                rest = raw_ds.split("SEARCH:", 1)[1].strip()
+                if "SHOW: YES" in rest or "SHOW:YES" in rest:
+                    solicita_imagen_ia = True
+                    app.logger.info("📸 La IA decidió enviar fichas (SHOW: YES)")
+                contexto_busqueda = rest.split('|')[0].strip().strip('"').strip("'")
+            except IndexError:
+                pass
+        elif "AGENDAR_CITA" in raw_upper:
+            app.logger.info("📅 IA detectó: SOLICITUD DE CITA.")
+            save_cita_inicial = {
+                'servicio_solicitado': contexto_busqueda if producto_aplica == "SI_APLICA" else None,
+                'telefono': numero
+            }
+            manejar_guardado_cita_unificado(
+                save_cita=save_cita_inicial, intent="AGENDAR_CITA", numero=numero,
+                texto=texto, historial=historial_objs, catalog_list=[], 
+                respuesta_text=None, incoming_saved=incoming_saved, config=config
+            )
+            return True
+        elif "TRANSFERIR_ASESOR" in raw_ds.upper():
+            app.logger.info("📢 IA detectó solicitud de asesor.")
+            pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
+            enviar_mensaje(numero, "Claro, te estoy transfiriendo con un asesor humano. En un momento te atenderán.", config)
+            return True
+        elif "SI_APLICA" in raw_ds:
+            producto_aplica = "SI_APLICA"
+
+        # --- Carga y Lógica de Fichas ---
+        precios = [] 
+        productos_para_ficha = [] 
+
+        if producto_aplica == "SI_APLICA" and texto:
+            precios = obtener_productos_por_palabra_clave(contexto_busqueda, config, limite=200, contexto_ia=contexto_ia_final)
+            solicita_imagen = solicita_imagen_ia
+            if not solicita_imagen and any(x in texto.lower() for x in ['foto', 'imagen', 'verla', 'muestras', 'enseñas']):
+                solicita_imagen = True
+
+            if solicita_imagen and precios:
+                termino = contexto_busqueda.lower().strip()
+                texto_msg = texto.lower()
+                
+                match_sku = [p for p in precios if termino == (p.get('sku') or '').lower() or (p.get('sku') or '').lower() in texto_msg]
+                match_modelo = [p for p in precios if termino in (p.get('modelo') or '').lower() or termino in (p.get('linea') or '').lower()]
+                match_categoria = [p for p in precios if termino in (p.get('categoria') or '').lower() or termino in (p.get('subcategoria') or '').lower()]
+                match_desc = [p for p in precios if termino in (p.get('descripcion') or '').lower()]
+
+                if match_sku:
+                    precios_imagenes = match_sku
+                    cantidad_imagenes = 1
+                elif match_modelo:
+                    precios_imagenes = match_modelo
+                    cantidad_imagenes = 1 if len(match_modelo) == 1 else 3
+                elif match_categoria:
+                    precios_imagenes = match_categoria
+                    cantidad_imagenes = 3
+                else:
+                    precios_imagenes = match_desc
+                    cantidad_imagenes = 3
+
+                if any(w in texto_msg for w in ['todos', 'todas', 'todo', 'catálogo']):
+                    precios_imagenes = precios 
+                    cantidad_imagenes = min(10, len(precios_imagenes))
+
+                productos_para_ficha = precios_imagenes[:cantidad_imagenes]
+
+            # Fallback SKU exacto
+            for p in precios[:5]:
+                sku_p = p.get('sku', '')
+                if p.get('imagen') and sku_p and sku_p.lower() in texto.lower():
+                    if p not in productos_para_ficha: productos_para_ficha.insert(0, p)
+        
+        else:
+            # Bloque de Charla General / Identidad
+            try:
+                data_db = load_config(config)
+                if data_db and 'negocio' in data_db:
+                    config.update(data_db['negocio'])
+                    config.update(data_db['personalizacion'])
+                    config.update(data_db['restricciones'])
+            except Exception as e:
+                app.logger.error(f"❌ Falló load_config en el else: {e}")
+
+            generar_respuesta_deepseek(numero=numero, texto=texto, precios=[], 
+                                        historial=obtener_historial(numero, limite=6, config=config),
+                                        config=config, incoming_saved=incoming_saved, es_audio=es_audio)
+            return True 
+
+        # --- Ejecución de Intro y Fichas ---
+        generar_respuesta_deepseek(numero=numero, texto=texto, precios=precios, 
+                                    historial=obtener_historial(numero, limite=6, config=config),
+                                    config=config, incoming_saved=incoming_saved, es_audio=es_audio)
+
+        if productos_para_ficha:
+            envios_exitosos = 0
+            for p in productos_para_ficha:
+                img_url = p.get('imagen')
+                sku_p = p.get('sku', '') or 'S/N'
+                titulo_ficha = p.get('sku') or p.get('modelo') or 'Producto'
+                
+                lineas_precios = []
+                mapeo_precios = [('precio_menudeo', '💲 Precio Menudeo'), ('precio_mayoreo', '📦 Precio Mayoreo'),
+                                ('inscripcion', '💰 Inscripción'), ('mensualidad', '💳 Mensualidad'), ('precio', '💵 Precio')]
+
+                for llave, etiqueta in mapeo_precios:
+                    valor = p.get(llave)
+                    try:
+                        if valor and float(valor) > 0: lineas_precios.append(f"{etiqueta}: ${valor}")
+                    except: continue
+
+                precios_detalle = "\n".join(lineas_precios) if lineas_precios else "💲 Precio: Consultar"
+                medidas_val = str(p.get('medidas') or "").strip()
+                texto_medidas = f"📏 Medidas: {medidas_val}\n" if medidas_val and medidas_val not in ['0', '0.00', ''] else ""
+                descripcion_corta = (p.get('descripcion') or '')[:120]
+                
+                ficha_texto = (f"🔹 *{titulo_ficha}*\n{precios_detalle}\n{texto_medidas}📝 {descripcion_corta}\n🆔 SKU: {sku_p}")
+
+                if img_url and img_url.strip():
+                    try:
+                        url_completa = f"https://{request.host}/static/uploads/{img_url}"
+                        enviar_imagen(numero, url_completa, config)
+                        time.sleep(2.0)
+                        enviar_mensaje(numero, ficha_texto, config)
+                        actualizar_respuesta(numero, texto, ficha_texto, config, respuesta_tipo='imagen', respuesta_media_url=img_url)
+                        envios_exitosos += 1
+                        if envios_exitosos > 0: time.sleep(0.8)
+                    except Exception as e:
+                        app.logger.error(f"❌ Error enviando ficha: {e}")
+
+        return True
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error fatal en fichas_ia_total: {e}")
+        return False
+        
 def guardar_respuesta_sistema(numero, respuesta, config=None, respuesta_tipo='alerta_interna', respuesta_media_url=None):
     if config is None:
         config = obtener_configuracion_por_host()
