@@ -7547,7 +7547,7 @@ def obtener_asesores_por_user(username, default=2, cap=20):
         app.logger.warning(f"⚠️ obtener_asesores_por_user falló para user={username}: {e}")
         return default
 
-def obtener_conexion_db(config):
+def obtener_conexion_db_VIEJA(config):
     """Obtiene conexión a la base de datos correcta según la configuración"""
     try:
         if 'porfirianna' in config.get('dominio', ''):
