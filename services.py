@@ -101,19 +101,3 @@ def _ensure_precios_subscription_columns(config=None):
         logger.info("🔧 Columnas 'inscripcion' y 'mensualidad' aseguradas en tabla precios")
     except Exception as e:
         logger.warning(f"⚠️ _ensure_precios_subscription_columns failed: {e}")
-
-def obtener_conexion_db_VIEJA2(config):
-    """
-    Helper for special heuristics you previously had: returns a direct connection using config.
-    Kept for backward compatibility with existing callers that expect obtener_conexion_db(config).
-    """
-    try:
-        return mysql.connector.connect(
-            host=config.get('db_host', 'localhost'),
-            user=config.get('db_user', 'root'),
-            password=config.get('db_password', ''),
-            database=config.get('db_name', '')
-        )
-    except Exception as e:
-        logger.error(f"❌ obtener_conexion_db error for {config.get('db_name')}: {e}")
-        raise
