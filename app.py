@@ -77,7 +77,6 @@ app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "cualquier-cosa")
 app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 50 MB
 app.logger.setLevel(logging.INFO)
-
 GOOD_MORNING_THREAD_STARTED = False
 GOOGLE_CLIENT_SECRET_FILE = os.getenv("GOOGLE_CLIENT_SECRET_FILE")    
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
@@ -227,7 +226,6 @@ NUMEROS_CONFIG = {
         'telegram_token': os.getenv("TELEGRAM_BOT_TOKEN_LACSE"),
     }
 }
-
 soli = "cita"
 servicios_clave = [ 
             'página web', 'sitio web', 'ecommerce', 'tienda online',
@@ -237,27 +235,22 @@ servicios_clave = [
             'hosting', 'dominio', 'mantenimiento', 'soporte',
             'electronica', 'hardware', 'iot', 'internet de las cosas',
         ]    
-
 FACEBOOK_PAGE_MAP = {}
 for tenant_key, config_data in NUMEROS_CONFIG.items():
     # Obtener los NOMBRES de las variables de entorno
     page_id_env_key = config_data.get('messenger_page_id_env')
     token_env_key = config_data.get('messenger_token_env')
-    
     if page_id_env_key and token_env_key:
         # Obtener los VALORES reales del .env
         page_id = os.getenv(page_id_env_key)
         token = os.getenv(token_env_key)
-        
         # Si las variables existen en el .env, las agregamos al mapa
         if page_id and token:
             FACEBOOK_PAGE_MAP[page_id] = {
                 'tenant_number': tenant_key, # Este es el enlace dinámico (ej. '123')
                 'page_access_token': token
             }
-
 app.logger.info(f"🗺️ FACEBOOK_PAGE_MAP cargado dinámicamente con {len(FACEBOOK_PAGE_MAP)} páginas.")
-
 DEFAULT_CONFIG = NUMEROS_CONFIG['524495486824']
 WHATSAPP_TOKEN = DEFAULT_CONFIG['whatsapp_token']
 DB_HOST = DEFAULT_CONFIG['db_host']
@@ -266,7 +259,6 @@ DB_PASSWORD = DEFAULT_CONFIG['db_password']
 DB_NAME = DEFAULT_CONFIG['db_name']
 MI_NUMERO_BOT = DEFAULT_CONFIG['phone_number_id']
 PHONE_NUMBER_ID = MI_NUMERO_BOT
-
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 from whatsapp import (
@@ -285,11 +277,9 @@ print(f"🖨️ PRINT ======== VERIFICACIÓN DE TEXTO_A_VOZ ========")
 print(f"🖨️ PRINT - texto_a_voz está importada: {'texto_a_voz' in globals()}")
 print(f"🖨️ PRINT - Función: {texto_a_voz}")
 print(f"🖨️ PRINT ==========================================")
-# AGREGAR ESTO:
 print(f"🖨️ PRINT - Importando texto_a_voz desde whatsapp.py")
 print(f"🖨️ PRINT - texto_a_voz tipo: {type(texto_a_voz)}")
 print(f"🖨️ PRINT - texto_a_voz ubicación: {texto_a_voz.__module__ if hasattr(texto_a_voz, '__module__') else 'N/A'}")
-
 from files import (extraer_texto_pdf,
 extraer_texto_e_imagenes_pdf, extraer_texto_excel,
 extraer_texto_csv,
@@ -315,8 +305,6 @@ PREFIJOS_PAIS = {
     '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec',
     '591': 'bo', '507': 'pa', '502': 'gt'
 }
-#holi que tal
-#muy bien   
 def get_clientes_conn():
     return mysql.connector.connect(
         host=os.getenv("CLIENTES_DB_HOST"),
@@ -329,57 +317,43 @@ def descargar_template_excel(columnas):
     try:
         # Crea un DataFrame vacío con las columnas especificadas
         df = pd.DataFrame(columns=columnas)
-        
         # Usa BytesIO para guardar el archivo Excel en memoria
         output = io.BytesIO()
-        
         # Exporta el DataFrame a Excel
         # Usamos engine='xlsxwriter' para compatibilidad en el buffer
         df.to_excel(output, index=False, sheet_name='Plantilla_Productos', engine='xlsxwriter')
-        
         output.seek(0) # Mover el puntero al inicio del archivo
         return output
-
     except Exception as e:
         app.logger.error(f"🔴 Error generando template Excel: {e}")
         return None
-
 # --- Nuevo endpoint para descargar el template ---
 @app.route('/configuracion/precios/descargar-template', methods=['GET'])
 def descargar_template():
     """Descarga el template de Excel con las columnas requeridas (seleccionables)."""
-    
     cols_param = request.args.get('cols')
-    
     if cols_param:
         # Convertir la cadena separada por comas en una lista de columnas
         requested_columns = [col.strip() for col in cols_param.split(',') if col.strip()]
-        
         # Filtrar para asegurar que solo se usan columnas válidas
         columnas_template = [col for col in requested_columns if col in MASTER_COLUMNS]
     else:
         # Fallback: si no se especifica ninguna columna, usar todas
         columnas_template = MASTER_COLUMNS
-        
     # Validar que al menos se seleccionó una columna
     if not columnas_template:
         return "Debe seleccionar al menos una columna para descargar el template.", 400
-
     output = descargar_template_excel(columnas_template) # Esta función ya fue definida
-    
     if output:
         fecha_str = datetime.now().strftime('%Y%m%d')
         filename = f"Plantilla_Productos_{fecha_str}.xlsx"
-        
         # Devolver el archivo como respuesta de descarga
         return Response(
             output,
             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": f"attachment;filename={filename}"}
         )
-    
     return "Error generando el archivo", 500
-
 def _find_cliente_in_clientes_by_domain(dominio):
     """Helper: intenta encontrar la fila en la tabla usuarios de CLIENTES_DB por dominio/subdominio."""
     try:
@@ -411,7 +385,6 @@ def _find_cliente_in_clientes_by_domain(dominio):
     except Exception as e:
         app.logger.warning(f"⚠️ _find_cliente_in_clientes_by_domain error: {e}")
     return None
-
 def obtener_cliente_por_user(username):
     conn = get_clientes_conn()
     cur = conn.cursor(dictionary=True)
@@ -424,10 +397,8 @@ def obtener_cliente_por_user(username):
     row = cur.fetchone()
     cur.close(); conn.close()
     return row
-
 def verificar_password(password_plano, password_guardado):
     return password_plano == password_guardado
-
 def login_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
@@ -436,7 +407,6 @@ def login_required(f):
         g.auth_user = session.get('auth_user')
         return f(*args, **kwargs)
     return wrapper
-
 RUTAS_PUBLICAS = {
     'login', 'logout', 'webhook', 'webhook_verification',
     'static', 'debug_headers', 'debug_dominio', 'diagnostico',
@@ -451,15 +421,12 @@ def proteger_rutas():
     Debe registrarse *antes* de otras funciones @app.before_request que puedan redirigir.
     """
     app.logger.debug(f"🔐 proteger_rutas check: path={request.path} endpoint={request.endpoint}")
-
     # Endpoints explícitamente públicos por nombre
     if request.endpoint in RUTAS_PUBLICAS:
         return
-
     # Permitir archivos estáticos gestionados por Flask
     if request.endpoint and request.endpoint.startswith('static'):
         return
-        
     # Endpoints que sirven archivos/depuración (si los tienes)
     # Permitir accesos directos a rutas públicas por path (uploads y subpaths)
     public_path_prefixes = (
@@ -473,7 +440,6 @@ def proteger_rutas():
     )
     if request.path and any(request.path.startswith(p) for p in public_path_prefixes):
         return
-
     # Endpoints que sirven archivos/depuración (si los tienes)
     public_endpoints = {
         'serve_product_image',
@@ -488,7 +454,6 @@ def proteger_rutas():
     }
     if request.endpoint in public_endpoints:
         return
-
     # Si ya está autenticado, permitir
     if session.get('auth_user'):
         try:
@@ -505,11 +470,9 @@ def proteger_rutas():
             app.logger.error(f"🔴 Error validando schema en proteger_rutas: {e}")
         # Si pasa la comprobación, permitir
         return
-
     # Si llega aquí, no está autorizado -> redirigir al login
     app.logger.info(f"🔒 proteger_rutas: redirect to login for path={request.path} endpoint={request.endpoint}")
     return redirect(url_for('login', next=request.path))
-
 def desactivar_sesiones_antiguas(username, within_minutes=SESSION_ACTIVE_WINDOW_MINUTES):
     """Marks old sessions as inactive to avoid blocking new logins by stale entries."""
     try:
@@ -527,7 +490,6 @@ def desactivar_sesiones_antiguas(username, within_minutes=SESSION_ACTIVE_WINDOW_
         cur.close(); conn.close()
     except Exception as e:
         app.logger.error(f"Error desactivando sesiones antiguas: {e}")
-
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -538,7 +500,6 @@ def login():
         if cliente and verificar_password(password, cliente['password']):
             # 1) Cleanup stale sessions to avoid false positives
             desactivar_sesiones_antiguas(cliente['user'], SESSION_ACTIVE_WINDOW_MINUTES)
-
             # 2) Enforce concurrent sessions limit
             active_count = contar_sesiones_activas(cliente['user'], within_minutes=SESSION_ACTIVE_WINDOW_MINUTES)
             if cliente['shema'] == 'mektia':
@@ -548,7 +509,6 @@ def login():
             if active_count >= sesiones:
                 flash(f"❌ Este usuario ya tiene {active_count} sesiones activas. Cierra una sesión para continuar.", 'error')
                 return render_template('login.html'), 429
-
             # 3) Proceed with login
             session['auth_user'] = {
                 'id': cliente['id_cliente'],
@@ -561,10 +521,8 @@ def login():
             flash('✅ Inicio de sesión correcto', 'success')
             destino = request.args.get('next') or url_for('home')
             return redirect(destino)
-
         flash('❌ Usuario o contraseña incorrectos', 'error')
     return render_template('login.html')
-
 @app.route('/logout')
 def logout():
     try:
@@ -576,7 +534,6 @@ def logout():
     session.pop('auth_user', None)
     flash('Sesión cerrada', 'info')
     return redirect(url_for('login'))
-
 #def allowed_file(filename):
 #    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS 
 # === FUNCIÓN allowed_file ahora importada desde módulo ===
@@ -624,7 +581,6 @@ def _ensure_sesiones_table(conn):
     """)
     conn.commit()
     cur.close()
-
 def registrar_sesion_activa(username):
     try:
         conn = get_clientes_conn()
@@ -646,7 +602,6 @@ def registrar_sesion_activa(username):
         cur.close(); conn.close()
     except Exception as e:
         app.logger.error(f"Error registrando sesión activa: {e}")
-
 def actualizar_sesion_activa(username):
     try:
         if not username:
@@ -666,7 +621,6 @@ def actualizar_sesion_activa(username):
         cur.close(); conn.close()
     except Exception as e:
         app.logger.error(f"Error actualizando sesión activa: {e}")
-
 def cerrar_sesion_actual(username):
     try:
         conn = get_clientes_conn()
@@ -683,7 +637,6 @@ def cerrar_sesion_actual(username):
         cur.close(); conn.close()
     except Exception as e:
         app.logger.error(f"Error cerrando sesión actual: {e}")
-
 def contar_sesiones_activas(username, within_minutes=30):
     try:
         conn = get_clientes_conn()
@@ -703,7 +656,6 @@ def contar_sesiones_activas(username, within_minutes=30):
     except Exception as e:
         app.logger.error(f"Error contando sesiones activas: {e}")
         return 0
-
 @app.before_request
 def _heartbeat_sesion_activa():
     try:
@@ -712,48 +664,38 @@ def _heartbeat_sesion_activa():
             actualizar_sesion_activa(au['user'])
     except Exception as e:
         app.logger.debug(f"Heartbeat sesión falló: {e}")
-
 @app.route('/admin/sesiones/<username>')
 @login_required
 def admin_sesiones_username(username):
     count = contar_sesiones_activas(username, within_minutes=30)
     return jsonify({'username': username, 'activos_ultimos_30_min': count})
-
 @app.route('/configuracion/precios/vaciar', methods=['POST'])
 @login_required
 def configuracion_precios_vaciar():
     """Elimina todos los registros de la tabla precios y sus imágenes físicas."""
     config = obtener_configuracion_por_host()
-    
     # Verificación de seguridad
     au = session.get('auth_user') or {}
     if str(au.get('servicio') or '').strip().lower() != 'admin':
         flash('❌ No tienes permisos para vaciar la tabla.', 'error')
         return redirect(url_for('configuracion_precios'))
-
     conn = None
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor()
-        
         # 1. Vaciar la Base de Datos
         cursor.execute("TRUNCATE TABLE precios") 
         # Si usas imagenes_productos también deberías vaciarla:
         cursor.execute("TRUNCATE TABLE imagenes_productos") 
-        
         conn.commit()
         cursor.close()
-
         # ---------------------------------------------------------
         # 2. Borrar archivos físicos (Equivalente a rm -r /ruta/*)
         # ---------------------------------------------------------
         try:
-            
             # Esta función ya calcula la ruta: .../uploads/productos/tu_subdominio
             productos_dir, tenant_slug = get_productos_dir_for_config(config)
-            
             app.logger.info(f"🗑️ Intentando vaciar carpeta: {productos_dir}")
-
             # Verificar que el directorio existe antes de intentar borrar
             if os.path.exists(productos_dir):
                 # Iterar sobre cada archivo/carpeta dentro del directorio del tenant
@@ -766,29 +708,22 @@ def configuracion_precios_vaciar():
                             shutil.rmtree(file_path) # Borrar subcarpeta
                     except Exception as e:
                         app.logger.warning(f"⚠️ No se pudo borrar {file_path}: {e}")
-                
                 app.logger.info(f"✅ Carpeta de imágenes vaciada: {productos_dir}")
             else:
                 app.logger.info("ℹ️ La carpeta de productos no existía, nada que borrar.")
-
         except Exception as e_files:
             app.logger.error(f"🔴 Error borrando archivos físicos: {e_files}")
             # No detenemos el flujo, ya que la BD sí se borró
         # ---------------------------------------------------------
-
         flash('✅ Tabla de precios y carpeta de imágenes vaciadas correctamente.', 'success')
         app.logger.info(f"🗑️ Catálogo vaciado completo por usuario {au.get('user')}")
-        
     except Exception as e:
         app.logger.error(f"🔴 Error vaciando tabla precios: {e}")
         if conn: conn.rollback()
         flash(f'❌ Error al vaciar la tabla: {str(e)}', 'error')
-        
     finally:
         if conn: conn.close()
-
     return redirect(url_for('configuracion_precios'))
-
 @app.route('/admin/asignar-plan-dominio', methods=['POST'])
 @login_required
 def admin_asignar_plan_dominio():
@@ -801,13 +736,11 @@ def admin_asignar_plan_dominio():
         au = session.get('auth_user') or {}
         if str(au.get('servicio') or '').strip().lower() != 'admin':
             return jsonify({'error': 'Forbidden'}), 403
-
         data = request.get_json(silent=True) or {}
         domain = (data.get('domain') or '').strip()
         plan_id = data.get('plan_id')
         if not domain or not plan_id:
             return jsonify({'error': 'domain and plan_id required'}), 400
-
         conn = get_clientes_conn()
         cur = conn.cursor()
         try:
@@ -822,7 +755,6 @@ def admin_asignar_plan_dominio():
                 cur_pl.close()
             except Exception:
                 pass
-
             # Upsert domain_plans
             cur.execute("""
                 INSERT INTO domain_plans (dominio, plan_id, mensajes_incluidos)
@@ -832,7 +764,6 @@ def admin_asignar_plan_dominio():
             conn.commit()
         finally:
             cur.close(); conn.close()
-
         # Try to propagate to cliente row if exists (best-effort)
         propagated = False
         try:
@@ -840,20 +771,16 @@ def admin_asignar_plan_dominio():
             propagated = bool(ok)
         except Exception:
             propagated = False
-
         return jsonify({'success': True, 'domain': domain, 'plan_id': plan_id, 'propagated_to_cliente': propagated})
     except Exception as e:
         app.logger.error(f"🔴 admin_asignar_plan_dominio error: {e}")
         return jsonify({'error': str(e)}), 500
-
-
 @app.route('/configuracion/negocio', methods=['POST'])
 def guardar_configuracion_negocio():
     config = obtener_configuracion_por_host()
     # Agregar logging para ver qué datos se reciben
     app.logger.info(f"📧 Formulario recibido: {request.form}")
     app.logger.info(f"📧 Calendar email recibido: {request.form.get('calendar_email')}")
-    
     # Recopilar todos los datos del formulario
     datos = {
         'ia_nombre': request.form.get('ia_nombre'),
@@ -869,37 +796,28 @@ def guardar_configuracion_negocio():
         'transferencia_nombre': request.form.get('transferencia_nombre'),
         'transferencia_banco': request.form.get('transferencia_banco')
     }
-    
     # Manejar la subida del logo
     if 'app_logo' in request.files and request.files['app_logo'].filename != '':
         logo = request.files['app_logo']
         filename = secure_filename(f"logo_{int(time.time())}_{logo.filename}")
-        
         # Identificar al cliente para la ruta física
         _, tenant_slug = get_productos_dir_for_config(config)
-        
         # Construir la ruta a su carpeta específica: /uploads/logos/ofitodo/
         logo_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'logos', tenant_slug)
         os.makedirs(logo_dir, exist_ok=True)
-        
         upload_path = os.path.join(logo_dir, filename)
-        
         # Guardar el archivo físicamente en la carpeta del cliente
         app.logger.info(f"💾 Guardando logo físicamente en: {upload_path}")
         logo.save(upload_path)
-        
         # Guardar SOLO el nombre limpio en la BD (ejemplo: logo_123.png)
         datos['app_logo'] = filename
-        
     elif request.form.get('app_logo_actual'):
         # Al mantener el logo, también limpiamos la ruta por si viene con /static/...
         logo_actual = request.form.get('app_logo_actual')
         datos['app_logo'] = os.path.basename(logo_actual)
-        
     # Guardar en la base de datos
     conn = get_db_connection(config)
     cursor = conn.cursor()
-    
     # Verificar/crear columnas necesarias (calendar_email + transferencias)
     try:
         required_cols = {
@@ -925,7 +843,6 @@ def guardar_configuracion_negocio():
             conn.rollback()
         except:
             pass
-
     # Verificar si existe una configuración
     try:
         cursor.execute("SELECT COUNT(*) FROM configuracion")
@@ -935,17 +852,14 @@ def guardar_configuracion_negocio():
         cursor.close(); conn.close()
         flash("❌ Error interno verificando configuración", "error")
         return redirect(url_for('configuracion_tab', tab='negocio'))
-
     if count > 0:
         # Actualizar configuración existente
         set_parts = []
         values = []
-        
         for key, value in datos.items():
             if value is not None:  # Solo incluir campos con valores (incluye cadena vacía explícita)
                 set_parts.append(f"{key} = %s")
                 values.append(value)
-        
         if set_parts:
             sql = f"UPDATE configuracion SET {', '.join(set_parts)} WHERE id = 1"
             try:
@@ -993,7 +907,6 @@ def guardar_configuracion_negocio():
                 cursor.execute(sql, [1] + list(datos.values()))
             except Exception as e2:
                 app.logger.error(f"🔴 Falló intento de reparación al insertar configuracion: {e2}")
-    
     try:
         conn.commit()
     except Exception:
@@ -1004,15 +917,12 @@ def guardar_configuracion_negocio():
     finally:
         cursor.close()
         conn.close()
-    
     flash("✅ Configuración guardada correctamente", "success")
     return redirect(url_for('configuracion_tab', tab='negocio', guardado=True))
-
 @app.context_processor
 def inject_app_config():
     # Obtener de la BD
     config = obtener_configuracion_por_host()
-    
     # Conectar a la BD
     try:
         conn = get_db_connection(config)
@@ -1021,7 +931,6 @@ def inject_app_config():
         cfg = cursor.fetchone()
         cursor.close()
         conn.close()
-        
         if cfg:
             # Usar ia_nombre como nombre de la aplicación
             return {
@@ -1030,28 +939,23 @@ def inject_app_config():
             }
     except Exception as e:
         app.logger.error(f"Error obteniendo configuración: {e}")
-    
     # Valores por defecto
     return {
         'app_nombre': 'SmartWhats',
         'app_logo': None
     }
-
 @app.route('/configuracion/precios/importar-excel', methods=['POST'])
 def importar_excel_directo():
     """Importa datos directamente desde Excel sin análisis de IA"""
     config = obtener_configuracion_por_host()
-    
     try:
         if 'excel_file' not in request.files:
             flash('❌ No se seleccionó ningún archivo', 'error')
             return redirect(url_for('configuracion_precios'))
-        
         file = request.files['excel_file']
         if file.filename == '':
             flash('❌ No se seleccionó ningún archivo', 'error')
             return redirect(url_for('configuracion_precios'))
-        
         if file and allowed_file(file.filename):
             # Guardar archivo temporalmente
             filename = secure_filename(f"excel_import_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
@@ -1061,37 +965,29 @@ def importar_excel_directo():
             imagenes_embedded = extraer_imagenes_embedded_excel(filepath)
             app.logger.info(f"🖼️ Imágenes embebidas extraídas: {len(imagenes_embedded)}")
             app.logger.info(f"📄 Excel guardado: {filepath}")
-            
             # Procesar el archivo Excel
             productos_importados = importar_productos_desde_excel(filepath, config)
-            
             # Eliminar el archivo temporal
             try:
                 os.remove(filepath)
             except:
                 pass
-                
             if productos_importados > 0:
                 flash(f'✅ {productos_importados} productos importados exitosamente', 'success')
             else:
                 flash('⚠️ No se pudieron importar productos. Revisa el formato del archivo.', 'warning')
-                
         else:
             flash('❌ Tipo de archivo no permitido. Solo se aceptan XLSX, XLS y CSV', 'error')
-        
         return redirect(url_for('configuracion_precios'))
-        
     except Exception as e:
         app.logger.error(f"🔴 Error importando Excel: {e}")
         app.logger.error(traceback.format_exc())
         flash(f'❌ Error procesando el archivo: {str(e)}', 'error')
         return redirect(url_for('configuracion_precios'))
-
 def importar_productos_desde_excel(filepath, config=None):
     """Importa productos desde Excel; guarda metadatos de imágenes y usa fallback unzip si openpyxl no encuentra imágenes."""
     if config is None:
         config = obtener_configuracion_por_host()
-
     try:
         extension = os.path.splitext(filepath)[1].lower()
         if extension in ['.xlsx', '.xls']:
@@ -1105,10 +1001,8 @@ def importar_productos_desde_excel(filepath, config=None):
         else:
             app.logger.error(f"Formato de archivo no soportado: {extension}")
             return 0
-
         df.columns = [col.lower().strip() if isinstance(col, str) else col for col in df.columns]
         app.logger.info(f"Columnas disponibles en el archivo: {list(df.columns)}")
-
         column_mapping = {
             'sku': 'sku',
             'categoria': 'categoria',
@@ -1134,7 +1028,6 @@ def importar_productos_desde_excel(filepath, config=None):
             'tipo_descuento': 'tipo_descuento',
             'descuento': 'descuento'
         }
-
         for excel_col, db_col in column_mapping.items():
             if excel_col in df.columns:
                 df = df.rename(columns={excel_col: db_col})
