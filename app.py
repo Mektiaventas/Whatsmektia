@@ -8413,12 +8413,22 @@ def webhook():
             app.logger.error("🔴 Webhook: message without 'from'")
             return 'OK', 200
 
-        # Determine tenant config from phone_number_id if available
-        phone_number_id = change.get('metadata', {}).get('phone_number_id')
-        config = obtener_configuracion_por_phone_number_id(phone_number_id) if phone_number_id else obtener_configuracion_por_host()
-        if not config:
-            config = obtener_configuracion_por_host()
+        # --- ESTO ES LO QUE CAMBIAS ---
+        metadata = change.get('metadata', {})
+        phone_number_id = metadata.get('phone_number_id')
+        
+        app.logger.info(f"📞 Webhook recibido para Phone ID: {phone_number_id}")
 
+        # Intentar buscar por Phone ID primero (es lo más seguro)
+        config = None
+        if phone_number_id:
+            config = obtener_configuracion_por_phone_number_id(phone_number_id)
+
+        # Si no se encontró por ID, intentar por Host (como respaldo)
+        if not config:
+            app.logger.warning(f"⚠️ No se encontró config para ID {phone_number_id}, usando Host")
+            config = obtener_configuracion_por_host()
+        # ------------------------------
         # Ensure kanban/chat meta/contact are present (quick pre-check)
         try:
             inicializar_chat_meta(numero, config)
