@@ -1450,6 +1450,7 @@ def asociar_imagenes_con_ia(servicios, imagenes, texto_pdf):
             })
         
         # Realizar la consulta
+        app.logger.info("🚩 IA: Ejecutando llamada en línea 1453")
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=messages,
@@ -1550,6 +1551,7 @@ def analizar_imagen_y_responder(numero, imagen_base64, caption, public_url=None,
 
         # 4. LLAMADA A LA IA
         client_local = OpenAI(api_key=OPENAI_API_KEY)
+        app.logger.info("🚩 IA: Ejecutando llamada en línea 1553")
         response = client_local.chat.completions.create(
             model="gpt-4o", 
             messages=[
@@ -9572,6 +9574,7 @@ Formato JSON:
         res_raw = resp.json()['choices'][0]['message']['content']
         
         # PARCHE DE FORMATO: Convertimos los saltos de línea para el panel web
+        app.logger.info("🚩 IA: Ejecutando llamada en el bloque que editamos")
         res_raw = res_raw.replace('\\n', '<br>')
         
         decision = json.loads(res_raw)
