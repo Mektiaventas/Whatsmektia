@@ -84,14 +84,24 @@ def get_db_connection(config=None):
 # services.py
 
 def get_cliente_by_subdomain(subdominio):
+    """
+    Busca al cliente y prepara el diccionario de configuración final.
+    Centraliza la lógica para que app.py no tenga que 'retrabajar'.
+    """
     try:
         conn = get_clientes_conn()
         cur = conn.cursor(dictionary=True)
+        # Usamos ALIAS (as) para que coincidan con lo que pide get_db_connection
         query = """
             SELECT 
-                u.id_cliente, u.user as db_user, u.password as db_password, u.shema as db_name,
-                c.wa_token as whatsapp_token, c.wa_phone_id as phone_number_id, 
-                c.wa_verify_token as verify_token, c.dominio
+                u.id_cliente, 
+                u.user as db_user, 
+                u.password as db_password, 
+                u.shema as db_name,
+                c.wa_token as whatsapp_token, 
+                c.wa_phone_id as phone_number_id, 
+                c.wa_verify_token as verify_token, 
+                c.dominio as subdominio_actual
             FROM usuarios u
             JOIN cliente c ON u.id_cliente = c.id
             WHERE c.dominio = %s OR u.shema = %s
@@ -102,8 +112,7 @@ def get_cliente_by_subdomain(subdominio):
         cur.close()
         conn.close()
         if resultado:
-            # AGREGAMOS EL HOST AQUÍ, EN EL SERVICIO
-            # Así app.py no tiene que saber nada de esto.
+            # Inyectamos el host aquí mismo
             resultado['db_host'] = os.getenv('DB_HOST', '127.0.0.1')
             return resultado
         return None
