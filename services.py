@@ -83,23 +83,37 @@ def get_db_connection(config=None):
 
 def get_cliente_by_subdomain(subdominio):
     """
-    Función ÚNICA y CENTRALIZADA para identificar clientes.
-    Migrada desde app.py para automatizar todo.
+    Une 'usuarios' y 'cliente' para obtener la configuración completa.
+    Esto elimina el hardcode y centraliza todo en la BD.
     """
     try:
-        conn = get_clientes_conn() # La conexión que YA tienes en services
+        conn = get_clientes_conn()
         cur = conn.cursor(dictionary=True)
-        # Buscamos por todas las posibilidades en una sola vuelta
+        
+        # El JOIN es la clave: 
+        # Traemos datos de la base de datos desde 'usuarios' (u)
+        # y los tokens de WhatsApp desde 'cliente' (c)
         query = """
-            SELECT * FROM usuarios 
-            WHERE shema = %s OR entorno = %s OR `user` = %s 
+            SELECT 
+                u.id_cliente, 
+                u.user, 
+                u.password, 
+                u.shema,
+                c.wa_token, 
+                c.wa_phone_id, 
+                c.wa_verify_token, 
+                c.dominio
+            FROM usuarios u
+            JOIN cliente c ON u.id_cliente = c.id
+            WHERE c.dominio = %s OR u.shema = %s
             LIMIT 1
         """
-        cur.execute(query, (subdominio, subdominio, subdominio))
-        cliente = cur.fetchone()
+        cur.execute(query, (subdominio, subdominio))
+        resultado = cur.fetchone()
+        
         cur.close()
         conn.close()
-        return cliente
+        return resultado
     except Exception as e:
         logger.error(f"❌ Error en get_cliente_by_subdomain: {e}")
         return None
