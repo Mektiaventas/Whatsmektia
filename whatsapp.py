@@ -342,10 +342,10 @@ def enviar_mensaje(numero, texto, config=None):
     except Exception as e:
         logger.error(f"🔴 Exception (WhatsApp): {e}")
         return False 
-def enviar_imagen(numero, image_url, config=None):
+def enviar_imagen(numero, image_url, texto=None, config=None):
     """
-    Envía una imagen a WhatsApp construyendo la URL pública basada en el tenant,
-    siguiendo la misma lógica multitenant que el audio.
+    Envía una imagen a WhatsApp con soporte para CAPTION (texto integrado).
+    Si 'texto' tiene contenido, llegará en un solo mensaje con la imagen.
     """
     try:
         # 1. Configuración de Token y Tenant
@@ -359,19 +359,18 @@ def enviar_imagen(numero, image_url, config=None):
         cfg = config or {}
         phone_id = cfg.get('phone_number_id')
         token = cfg.get('whatsapp_token')
-        # Detectar el slug del cliente (ej: ofitodo, unilova)
         dominio = cfg.get('dominio', 'app.mektia.com')
         tenant_slug = dominio.split('.')[0] if dominio else 'default'
+
         if not phone_id or not token:
             logger.error(f"🔴 enviar_imagen ({tenant_slug}): falta phone_id o token")
             return False
-        # 2. CONSTRUIR URL PÚBLICA (Siguiendo la estructura de Nginx que acabamos de validar)
-        # image_url suele ser solo el nombre del archivo: "imagen.png"
+
+        # 2. CONSTRUIR URL PÚBLICA
         filename = os.path.basename(image_url.strip())
-        # Aseguramos que el dominio tenga https
         base_url = dominio if dominio.startswith('http') else f"https://{dominio}"
-        # La ruta que confirmamos con CURL: /uploads/productos/{tenant}/{archivo}
         public_url = f"{base_url.rstrip('/')}/uploads/productos/{tenant_slug}/{filename}"
+
         # 3. Enviar a Meta via Graph API
         url_api = f"https://graph.facebook.com/v21.0/{phone_id}/messages"
         headers = {
@@ -379,16 +378,23 @@ def enviar_imagen(numero, image_url, config=None):
             'Content-Type': 'application/json'
         }
         
+        # --- CAMBIO CLAVE: Se añade el campo 'caption' si existe texto ---
+        image_data = {'link': public_url}
+        if texto and str(texto).strip():
+            image_data['caption'] = str(texto).strip()
+
         payload = {
             'messaging_product': 'whatsapp',
             'to': numero,
             'type': 'image',
-            'image': {'link': public_url}
+            'image': image_data
         }
-        logger.info(f"📤 Enviando imagen ({tenant_slug}): {public_url} a {numero}")
+
+        logger.info(f"📤 Enviando imagen con texto ({tenant_slug}): {public_url}")
         r = requests.post(url_api, headers=headers, json=payload, timeout=15)
+        
         if r.status_code in (200, 201, 202):
-            logger.info(f"✅ Imagen enviada correctamente a {numero}")
+            logger.info(f"✅ Imagen y texto enviados juntos a {numero}")
             return True
         else:
             logger.error(f"🔴 Error Meta API: {r.status_code} - {r.text}")
