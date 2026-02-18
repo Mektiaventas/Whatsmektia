@@ -10484,13 +10484,14 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
                                 config=config, incoming_saved=incoming_saved, es_audio=es_audio)
 
     if productos_para_ficha:
-        app.logger.info(f"🚀 Enviando {len(productos_para_ficha)} fichas (Imagen + Info)...")
+        app.logger.info(f"🚀 Enviando {len(productos_para_ficha)} fichas unificadas...")
         envios_exitosos = 0
         for p in productos_para_ficha:
             img_url = p.get('imagen')
             sku_p = p.get('sku', '') or 'S/N'
             titulo_ficha = p.get('sku') or p.get('modelo') or 'Producto'
             
+            # 1. Armamos el texto de la ficha
             lineas_precios = []
             mapeo_precios = [('precio_menudeo', '💲 Precio Menudeo'), ('precio_mayoreo', '📦 Precio Mayoreo'),
                             ('inscripcion', '💰 Inscripción'), ('mensualidad', '💳 Mensualidad'), ('precio', '💵 Precio')]
@@ -10507,20 +10508,21 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
             descripcion_corta = (p.get('descripcion') or '')[:120]
             if len(p.get('descripcion') or '') > 120: descripcion_corta += "..."
 
+            # Este es el texto final
             ficha_texto = (f"🔹 *{titulo_ficha}*\n{precios_detalle}\n{texto_medidas}📝 {descripcion_corta}\n🆔 SKU: {sku_p}")
 
+            # 2. Enviamos TODO en un solo comando
             if img_url and img_url.strip():
                 try:
-                    url_completa = f"https://{request.host}/static/uploads/{img_url}"
-                    enviar_imagen(numero, url_completa, config)
-                    time.sleep(2.0)
-                    enviar_mensaje(numero, ficha_texto, config)
+                    # USAMOS EL PARÁMETRO 'texto' DENTRO DE ENVIAR_IMAGEN
+                    enviar_imagen(numero, img_url, texto=ficha_texto, config=config)
                     
+                    # Guardamos para el historial web
                     texto_para_web = f"<b>{titulo_ficha}</b><br>{precios_detalle}<br>{texto_medidas}<br>📝 {descripcion_corta}<br>🆔 SKU: {sku_p}"
                     actualizar_respuesta(numero, texto, texto_para_web, config, respuesta_tipo='imagen', respuesta_media_url=img_url)
                     
                     envios_exitosos += 1
-                    if envios_exitosos > 0: time.sleep(0.8)
+                    time.sleep(1.2) # Pausa para no saturar WhatsApp
                 except Exception as e:
                     app.logger.error(f"❌ Error enviando ficha: {e}")
 
