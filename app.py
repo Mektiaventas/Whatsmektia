@@ -9549,7 +9549,11 @@ Formato JSON:
                 if u: lista_mensajes.append({"role": "user", "content": u})
                 if a: lista_mensajes.append({"role": "assistant", "content": a})
         
-        contenido_usuario = f"{texto}{contexto_real}"
+        # --- AQUÍ EMPIEZA EL REEMPLAZO ---
+        # Separamos la pregunta del catálogo para que la IA no se haga bolas
+        contexto_texto = f"\n\n### DATOS DEL NEGOCIO Y PRECIOS:\n{contexto_real}" if contexto_real else ""
+        contenido_usuario = f"Pregunta del Cliente: {texto}{contexto_texto}"
+        
         lista_mensajes.append({"role": "user", "content": contenido_usuario})
 
         # 5. LLAMADA A LA API
@@ -9565,14 +9569,18 @@ Formato JSON:
         resp = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload, timeout=15)
         resp.raise_for_status()
         
-        res_json = resp.json()['choices'][0]['message']['content']
-        decision = json.loads(res_json)
+        res_raw = resp.json()['choices'][0]['message']['content']
+        
+        # PARCHE DE FORMATO: Convertimos los saltos de línea para el panel web
+        res_raw = res_raw.replace('\\n', '<br>')
+        
+        decision = json.loads(res_raw)
         
         mensaje_para_cliente = decision.get('respuesta_text') or "Claro, aquí tienes la información."
         intent = decision.get('intent', 'INFORMACION').upper()
         notify_asesor = bool(decision.get('notify_asesor'))
 
-        # 6. FILTRO DE PREVALENCIA: Bloqueamos al asesor si tenemos qué vender
+        # 6. FILTRO DE PREVALENCIA
         palabras_humano = ["asesor", "humano", "persona", "hablar con alguien"]
         usuario_quiere_humano = any(w in texto.lower() for w in palabras_humano)
 
@@ -9581,6 +9589,7 @@ Formato JSON:
                 app.logger.info("🛡️ Bloqueando transferencia: IA tiene productos para mostrar.")
                 intent = "INFORMACION"
                 notify_asesor = False
+        # --- AQUÍ TERMINA EL REEMPLAZO ---
 
         # 7. LÓGICA DE AUDIO (TTS)
         audio_url_publica = None
