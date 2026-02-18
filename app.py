@@ -9510,47 +9510,41 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
         # Intentamos obtener el subdominio de 3 formas para que NUNCA sea "NO DEFINIDO"
         subdominio = config.get('subdominio_actual') or config.get('dominio', 'mektia').split('.')[0]
 
-        # 3. CONTEXTO DINÁMICO (Sin escalas)
-        hay_productos = False
+        # 3. CONTEXTO DE NEGOCIO (Forzamos la data aquí)
+        detalles_negocio = f"""
+        DATOS DEL NEGOCIO:
+        - Nombre: {negocio_nombre}
+        - Tu nombre (IA): {ia_nombre}
+        - Qué hacemos: {que_hace}
+        """
+
         contexto_productos = ""
-        
-        # Si no hay búsqueda exitosa, usamos el 'que_hace' de la DB
         if catalog_list and len(catalog_list) > 0:
-            hay_productos = True
-            contexto_productos = "\nCURSOS Y PRECIOS DISPONIBLES:\n"
+            contexto_productos = "\nLISTA DE PRECIOS REALES:\n"
             for p in catalog_list:
                 contexto_productos += f"- {p.get('nombre')}: ${p.get('precio_menudeo')}\n"
         else:
-            contexto_productos = f"\nLO QUE OFRECEMOS EN {negocio_nombre.upper()}:\n{que_hace}"
+            contexto_productos = "\n(No hay lista de precios técnica, usa la descripción general del negocio).\n"
 
-        # 4. SYSTEM PROMPT (ADN DINÁMICO REFORZADO)
-        # Eliminamos el texto estático del JSON para que la IA tenga que pensar
+        # 4. EL SYSTEM PROMPT NO NEGOCIABLE
         system_prompt = f"""
-        Identidad: Eres {ia_nombre}, el asistente virtual de {negocio_nombre}.
-        Contexto Actual: {contexto_productos}
+        {detalles_negocio}
+        
+        {contexto_productos}
 
-        REGLAS CRÍTICAS:
-        1. Tu nombre es {ia_nombre}. Nunca digas 'Asistente' o 'IA'.
-        2. Si preguntan por precios o productos, usa SOLO el 'Contexto Actual' arriba mencionado.
-        3. No inventes servicios. Si no está en el contexto, di que un asesor le informará.
-        4. Responde SIEMPRE en este formato JSON:
+        INSTRUCCIONES DE PERSONALIDAD:
+        1. Eres {ia_nombre}. Cada vez que hables, debes sonar como el asistente de {negocio_nombre}.
+        2. Si el usuario pide precios y no hay una lista arriba, explica qué servicios ofrece {negocio_nombre} basado en 'Qué hacemos'.
+        3. NUNCA uses frases como "En Negocio, ofrecemos...". Usa "{negocio_nombre}".
+        4. No respondas con "Claro, aquí tienes la información" si no vas a dar información específica.
+
+        RESPONDE SIEMPRE EN ESTE JSON:
         {{
           "intent": "INFORMACION",
-          "respuesta_text": "Tu respuesta aquí...",
+          "respuesta_text": "Escribe aquí tu respuesta con personalidad...",
           "notify_asesor": false
         }}
         """
-
-        lista_mensajes = [{"role": "system", "content": system_prompt}]
-        
-        if historial:
-            for h in historial:
-                u = h.get('mensaje') or h.get('user')
-                a = h.get('respuesta') or h.get('assistant')
-                if u: lista_mensajes.append({"role": "user", "content": u})
-                if a: lista_mensajes.append({"role": "assistant", "content": a})
-        
-        lista_mensajes.append({"role": "user", "content": texto})
 
         # 5. LLAMADA A LA API
         api_key = os.getenv('DEEPSEEK_API_KEY')
