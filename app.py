@@ -11043,25 +11043,24 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
   
 def obtener_configuracion_por_host():
     try:
-        # Detectamos quién nos llama (ej: 'unilova', 'ofitodo' o 'smartwhats')
         raw_host = request.host.lower().split(':')[0]
         subdominio = raw_host.split('.')[0]
-        # Si entran por smartwhats.mektia.com o directamente mektia.com
-        # forzamos que busque 'mektia' en la base de datos
-        if subdominio in ['smartwhats', 'www', 'mektia']:
+        # Si no hay subdominio o es el principal, forzamos buscar 'mektia'
+        if subdominio in ['www', 'smartwhats', 'mektia'] or '.' not in request.host:
             subdominio = 'mektia'
-        # LA CLAVE: get_cliente_by_subdomain debe traer TODO de la DB
-        # (db_name, wa_token, wa_phone_id, etc.)
+        # Buscamos en la DB
         config = get_cliente_by_subdomain(subdominio)
         if config:
-            app.logger.info(f"✅ Configuración cargada desde DB para: {subdominio}")
             return config
-        # Si de plano no existe en la DB, lanzamos error o un default genérico sin tokens
-        app.logger.error(f"❌ El subdominio '{subdominio}' no existe en la tabla maestra.")
-        return None 
+        # Si no existe en la DB, regresamos un default básico (Mektia)
+        return {
+            'db_name': 'mektia',
+            'db_host': 'localhost',
+            'dominio': 'mektia.com'
+        }
     except Exception as e:
-        app.logger.error(f"🔴 Error crítico en obtener_configuracion_por_host: {e}")
-        return None
+        logger.error(f"🔴 Error en obtener_configuracion_por_host: {e}")
+        return {'db_name': 'mektia', 'db_host': 'localhost'}
     
 @app.route('/diagnostico')
 def diagnostico():
