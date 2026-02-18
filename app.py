@@ -5067,114 +5067,14 @@ def obtener_numeros_asesores_db(config=None):
         return tuple()
 
 def enviar_catalogo(numero, original_text=None, config=None):
-    if config is None:
-        from app import obtener_configuracion_por_host # Asegúrate de que la importación sea correcta
-        config = obtener_configuracion_por_host()
+    """
+    Función puente: Mantiene compatibilidad con el código viejo
+    pero usa la nueva lógica inteligente.
+    """
+    app.logger.info(f"🔄 Redirigiendo enviar_catalogo a Ejecución Inteligente para {numero}")
+    # Simplemente llamamos a nuestra nueva función de envío
+    return ejecutar_envio_pdf_inteligente(numero, original_text, config)
     
-    # 1. Extraer tenant (unilova, ofitodo, etc.)
-    host_parts = request.host.split('.')
-    tenant_slug = (config.get('subdominio') or 
-                   config.get('bd_name') or 
-                   (host_parts[0] if host_parts else 'default')).lower().strip()
-
-    app.logger.info(f"⚡ [BYPASS CATALOGO] Buscando archivos para tenant: {tenant_slug}")
-    usuario_texto = (original_text or "catalogo").lower()
-    
-    conn = None
-    cursor = None
-    
-    try:
-        # 2. Conexión a Base de Datos
-        from services import get_db_connection
-        conn = get_db_connection(config)
-        cursor = conn.cursor(dictionary=True)
-        
-        # SQL con tus columnas reales
-        query = "SELECT filename, descripcion FROM documents_publicos WHERE tenant_slug = %s"
-        cursor.execute(query, (tenant_slug,))
-        docs = cursor.fetchall()
-        
-        if not docs:
-            app.logger.warning(f"⚠️ No se encontraron documentos para {tenant_slug} en DB.")
-            return False 
-
-        # 3. Lógica de selección por coincidencia de palabras
-        doc_a_enviar = None
-        max_puntos = 0
-        usuario_texto_limpio = usuario_texto.lower().strip()
-        
-        # Diccionario de soporte para términos cortos (puedes dejarlo o quitarlo, no afecta la dinámica)
-        sinonimos = {
-            'ia': 'inteligencia artificial',
-            'excel': 'ofimática excel hojas de calculo',
-            'mantenimiento': 'mantenimiento industrial'
-        }
-        
-        # Expandir consulta si hay términos conocidos
-        for corto, largo in sinonimos.items():
-            if corto in usuario_texto_limpio.split():
-                usuario_texto_limpio += f" {largo}"
-
-        # Filtrado de palabras de ruido
-        stop_words = {'el', 'la', 'los', 'las', 'un', 'una', 'de', 'del', 'tu', 'mi', 'me', 'mándame', 'enviame', 'temario', 'catalogo', 'por', 'favor', 'dame'}
-        palabras_clave_usuario = [p for p in usuario_texto_limpio.split() if p not in stop_words]
-
-        # --- BÚSQUEDA DINÁMICA ---
-        for d in docs:
-            texto_doc = f"{(d['descripcion'] or '').lower()} {d['filename'].lower()}"
-            puntos = 0
-            
-            for p in palabras_clave_usuario:
-                # Si la palabra clave está en el nombre o descripción, sumamos puntos
-                if p in texto_doc:
-                    puntos += 2
-                # Bonus si la palabra es idéntica (evita confusiones parciales)
-                if any(word == p for word in texto_doc.split()):
-                    puntos += 3
-            
-            if puntos > max_puntos:
-                max_puntos = puntos
-                doc_a_enviar = d
-
-        # --- VALIDACIÓN DE RESULTADO ---
-        from whatsapp import enviar_mensaje, enviar_documento # Importamos funciones reales
-
-        if max_puntos == 0:
-            # Si no hay match claro, listamos lo que sí tenemos disponible
-            opciones_lista = "\n".join([f"• {d['descripcion'] or d['filename']}" for d in docs[:6]])
-            mensaje_ayuda = (
-                f"No encontré un temario específico para '{usuario_texto}'. 🧐\n\n"
-                f"Pero puedes pedirme cualquiera de estos:\n{opciones_lista}"
-            )
-            app.logger.info(f"⚠️ No se halló coincidencia. Enviando lista de opciones a {numero}")
-            enviar_mensaje(numero, mensaje_ayuda, config)
-            return True
-
-        # 4. Construcción de URL y Nombre del archivo encontrado
-        filename = doc_a_enviar['filename']
-        url_documento = f"https://{request.host}/uploads/docs/{tenant_slug}/{filename}"
-        
-        # Formatear el nombre para que WhatsApp lo muestre limpio
-        display_name = (doc_a_enviar['descripcion'] or "Plan de Estudios").strip()[:40]
-        if not display_name.lower().endswith('.pdf'):
-            display_name += ".pdf"
-        
-        app.logger.info(f"🚀 Enviando archivo: {filename} a {numero}")
-
-        # 5. Envío final
-        return enviar_documento(numero, url_documento, display_name, config)
-
-    except Exception as e:
-        app.logger.error(f"❌ Error en enviar_catalogo: {str(e)}")
-        import traceback
-        app.logger.error(traceback.format_exc())
-        return False
-        
-    finally:
-        # 6. Limpieza de conexiones (Crucial para no agotar el pool)
-        if cursor: cursor.close()
-        if conn: conn.close()
-            
 @app.route('/autorizar-google')
 def autorizar_google():
     """Endpoint para autorizar manualmente con Google"""
