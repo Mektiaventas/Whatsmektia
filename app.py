@@ -49,6 +49,7 @@ from whatsapp import enviar_mensaje, obtener_imagen_whatsapp  # <--- AQUÍ
 from flask import request
 from flask import request, jsonify, render_template
 from services import get_cliente_by_subdomain # Importamos la función que centraliza todo
+from services import get_db_connection, get_cliente_by_subdomain
 from bot_logic.leads import start_followup_scheduler
 MASTER_COLUMNS = [
     'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
