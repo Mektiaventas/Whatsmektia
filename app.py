@@ -7223,11 +7223,11 @@ def serve_public_docs(relpath):
         abort(500)
 
 def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo='texto', respuesta_media_url=None, productos_data=None):
-# --- PARCHE DE FORMATO PARA PANEL WEB ---
+    # --- PARCHE DE FORMATO PARA PANEL WEB (Asegúrate de que haya 4 espacios aquí) ---
     if respuesta and isinstance(respuesta, str):
-        # Si ya tiene HTML (como las fichas), no lo tocamos tanto, 
-        # pero si es texto plano de la IA, lo convertimos:
-        if "<b>" not in respuesta and "<i>" not in respuesta:
+        import re
+        # Si NO tiene etiquetas de negrita HTML, procesamos el texto plano de la IA
+        if "<b>" not in respuesta:
             respuesta = respuesta.replace('\n', '<br>')
             respuesta = re.sub(r'\*(.*?)\*', r'<b>\1</b>', respuesta)
     # ----------------------------------------
