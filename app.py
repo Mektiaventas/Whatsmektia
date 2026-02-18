@@ -308,12 +308,8 @@ PREFIJOS_PAIS = {
     '591': 'bo', '507': 'pa', '502': 'gt'
 }
 def get_clientes_conn():
-    return mysql.connector.connect(
-        host=os.getenv("CLIENTES_DB_HOST"),
-        user=os.getenv("CLIENTES_DB_USER"),
-        password=os.getenv("CLIENTES_DB_PASSWORD"),
-        database=os.getenv("CLIENTES_DB_NAME")
-    )
+    # Usamos la conexión que ya está configurada en services
+    return get_db_connection({'db_name': 'clientes'})
 def descargar_template_excel(columnas):
     """Genera un archivo Excel con los encabezados de columna dados y sin datos."""
     try:
