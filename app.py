@@ -9510,29 +9510,35 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
         # Intentamos obtener el subdominio de 3 formas para que NUNCA sea "NO DEFINIDO"
         subdominio = config.get('subdominio_actual') or config.get('dominio', 'mektia').split('.')[0]
 
-        # 3. CONTEXTO DINÁMICO
+        # 3. CONTEXTO DINÁMICO (Sin escalas)
         hay_productos = False
         contexto_productos = ""
         
+        # Si no hay búsqueda exitosa, usamos el 'que_hace' de la DB
         if catalog_list and len(catalog_list) > 0:
             hay_productos = True
-            contexto_productos = "\nPRODUCTOS/CURSOS DISPONIBLES:\n"
+            contexto_productos = "\nCURSOS Y PRECIOS DISPONIBLES:\n"
             for p in catalog_list:
                 contexto_productos += f"- {p.get('nombre')}: ${p.get('precio_menudeo')}\n"
         else:
-            contexto_productos = f"\nINFORMACIÓN GENERAL: {que_hace}"
+            contexto_productos = f"\nLO QUE OFRECEMOS EN {negocio_nombre.upper()}:\n{que_hace}"
 
-        # 4. SYSTEM PROMPT (ADN Dinámico)
+        # 4. SYSTEM PROMPT (ADN DINÁMICO REFORZADO)
+        # Eliminamos el texto estático del JSON para que la IA tenga que pensar
         system_prompt = f"""
-        Eres {ia_nombre}, el asistente oficial de {negocio_nombre}.
-        Misión: {que_hace}
-        {contexto_productos}
+        Identidad: Eres {ia_nombre}, el asistente virtual de {negocio_nombre}.
+        Contexto Actual: {contexto_productos}
 
-        REGLAS DE RESPUESTA:
-        1. Responde siempre como {ia_nombre}.
-        2. NUNCA menciones a 'Mektia'. Tu mundo es {negocio_nombre}.
-        3. Si preguntan por precios, usa la lista de arriba.
-        4. IMPORTANTE: Tu respuesta DEBE estar en formato JSON.
+        REGLAS CRÍTICAS:
+        1. Tu nombre es {ia_nombre}. Nunca digas 'Asistente' o 'IA'.
+        2. Si preguntan por precios o productos, usa SOLO el 'Contexto Actual' arriba mencionado.
+        3. No inventes servicios. Si no está en el contexto, di que un asesor le informará.
+        4. Responde SIEMPRE en este formato JSON:
+        {{
+          "intent": "INFORMACION",
+          "respuesta_text": "Tu respuesta aquí...",
+          "notify_asesor": false
+        }}
         """
 
         lista_mensajes = [{"role": "system", "content": system_prompt}]
@@ -9546,28 +9552,15 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
         
         lista_mensajes.append({"role": "user", "content": texto})
 
-        # 5. LLAMADA A LA API
+        # 5. LLAMADA A LA API (Con temperatura baja para evitar alucinaciones)
         api_key = os.getenv('DEEPSEEK_API_KEY')
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         payload = {
             "model": "deepseek-chat", 
             "messages": lista_mensajes, 
             "response_format": {"type": "json_object"},
-            "temperature": 0.3
+            "temperature": 0.2 
         }
-        
-        resp = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload, timeout=15)
-        resp.raise_for_status()
-        
-        res_raw = resp.json()['choices'][0]['message']['content']
-        res_raw = res_raw.replace('\\n', '<br>')
-        
-        decision = json.loads(res_raw)
-        
-        mensaje_para_cliente = decision.get('respuesta_text') or "Claro, aquí tienes la información."
-        intent = decision.get('intent', 'INFORMACION').upper()
-        notify_asesor = bool(decision.get('notify_asesor'))
-
         # 6. FILTRO DE PREVALENCIA (Ya no va a fallar porque definimos hay_productos arriba)
         palabras_humano = ["asesor", "humano", "persona", "hablar con alguien"]
         usuario_quiere_humano = any(w in texto.lower() for w in palabras_humano)
