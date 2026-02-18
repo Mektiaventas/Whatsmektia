@@ -10,53 +10,51 @@ _MYSQL_POOLS = {}
 
 def get_db_connection(config=None):
     """
-    Intenta conectar como tú lo haces por SSH (sin password).
-    Si falla, usa la credencial 'Mektia#2025'.
+    Conexión automática. Si no hay base de datos especificada, 
+    conecta al servidor y permite que el flujo continúe.
     """
-    db_name = config.get('db_name', 'mektia') if config else 'mektia'
-    db_host = config.get('db_host', 'localhost') if config else 'localhost'
+    # 1. Extraer valores del config o usar defaults seguros
+    # Si config es None, usamos un diccionario vacío para que .get() no falle
+    cfg = config if config else {}
+    db_host = cfg.get('db_host', 'localhost')
+    # Si no hay db_name, conectamos sin base de datos (None) o a 'mysql' 
+    # para evitar el error "Unknown database"
+    db_name = cfg.get('db_name', None) 
     user = 'mektia'
-    
-    # Intentamos primero como tú entras por SSH (vacío)
     passwords_to_try = ['', 'Mektia#2025']
     
+    # Si no hay nombre de BD, no usamos Pool (porque el pool requiere una BD fija)
+    if not db_name:
+        for pwd in passwords_to_try:
+            try:
+                return mysql.connector.connect(
+                    host=db_host,
+                    user=user,
+                    password=pwd,
+                    charset='utf8mb4'
+                )
+            except:
+                continue
+    # Si SÍ hay db_name, usamos el Pool que ya teníamos
     pool_key = f"{db_host}|{user}|{db_name}"
-
-    # Si ya tenemos un pool que funciona, lo usamos
-    if pool_key in _MYSQL_POOLS:
-        try:
-            return _MYSQL_POOLS[pool_key].get_connection()
-        except:
-            del _MYSQL_POOLS[pool_key]
-
-    # Si no hay pool o falló, probamos las contraseñas
-    for pwd in passwords_to_try:
-        try:
-            conn = mysql.connector.connect(
-                host=db_host,
-                user=user,
-                password=pwd,
-                database=db_name,
-                charset='utf8mb4',
-                connect_timeout=2
-            )
-            # Si funcionó, creamos el pool con ESTA contraseña exitosa
-            if pool_key not in _MYSQL_POOLS:
+    if pool_key not in _MYSQL_POOLS:
+        for pwd in passwords_to_try:
+            try:
                 _MYSQL_POOLS[pool_key] = pooling.MySQLConnectionPool(
-                    pool_name=f"pool_{db_name}",
+                    pool_name=f"pool_{db_name}_{os.getpid()}",
                     pool_size=5,
                     host=db_host,
                     user=user,
                     password=pwd,
                     database=db_name
                 )
-            return conn
-        except mysql.connector.Error as err:
-            if pwd == passwords_to_try[-1]: # Si ya es el último intento
-                logger.error(f"❌ Fallo total de conexión a {db_name}: {err}")
-                raise
-            continue
-
+                break # Logró crear el pool
+            except:
+                if pwd == passwords_to_try[-1]:
+                    # Si falló con todos los passwords y BD, reintentamos sin BD
+                    logger.error(f"❌ No se pudo conectar a la BD {db_name}")
+                    raise
+    return _MYSQL_POOLS[pool_key].get_connection()
 def get_cliente_by_subdomain(subdominio):
     """Busca configuración usando el método de conexión robusto."""
     try:
