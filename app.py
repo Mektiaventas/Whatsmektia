@@ -10326,7 +10326,7 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
             "Instrucciones:\n"
             "1. Si el usuario busca un producto, responde: SEARCH: <término preciso>\n"
             "2. Si la intención implica VER/RECIBIR el producto, agrega: | SHOW: YES\n"
-            "3. Si SHOW: YES, tu respuesta de texto debe ser SOLO UNA FRASE DE INTRODUCCIÓN (ej: 'Aquí tienes las opciones'). NO describas los productos, el sistema enviará fichas técnicas.\n"
+            "3. Si SHOW: YES, tu respuesta de texto debe ser SOLO UNA FRASE (ej: 'Aquí tienes los detalles:'). NO expliques nada del producto aquí.\n"
             "4. Si NO hay imágenes (SHOW: NO), entonces sí explica precios y detalles.\n\n"
             "5. SI EL USUARIO PIDE HABLAR CON UN ASESOR, HUMANO O PERSONA, responde: TRANSFERIR_ASESOR\n\n"
             "6. SI EL USUARIO QUIERE AGENDAR UNA CITA: responde AGENDAR_CITA. Tu respuesta de texto debe ser solo: '¡Claro! Con gusto te ayudo. ¿Qué día y hora te gustaría?'\n\n"
