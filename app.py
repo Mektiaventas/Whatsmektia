@@ -253,14 +253,14 @@ for tenant_key, config_data in NUMEROS_CONFIG.items():
                 'page_access_token': token
             }
 app.logger.info(f"🗺️ FACEBOOK_PAGE_MAP cargado dinámicamente con {len(FACEBOOK_PAGE_MAP)} páginas.")
-DEFAULT_CONFIG = NUMEROS_CONFIG['524495486824']
-WHATSAPP_TOKEN = DEFAULT_CONFIG['whatsapp_token']
-DB_HOST = DEFAULT_CONFIG['db_host']
-DB_USER = DEFAULT_CONFIG['db_user']
-DB_PASSWORD = DEFAULT_CONFIG['db_password']
-DB_NAME = DEFAULT_CONFIG['db_name']
-MI_NUMERO_BOT = DEFAULT_CONFIG['phone_number_id']
-PHONE_NUMBER_ID = MI_NUMERO_BOT
+# DEFAULT_CONFIG = NUMEROS_CONFIG['524495486824']
+# WHATSAPP_TOKEN = DEFAULT_CONFIG['whatsapp_token']
+# DB_HOST = DEFAULT_CONFIG['db_host']
+# DB_USER = DEFAULT_CONFIG['db_user']
+# DB_PASSWORD = DEFAULT_CONFIG['db_password']
+# DB_NAME = DEFAULT_CONFIG['db_name']
+# MI_NUMERO_BOT = DEFAULT_CONFIG['phone_number_id']
+# PHONE_NUMBER_ID = MI_NUMERO_BOT
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 from whatsapp import (
