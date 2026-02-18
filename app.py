@@ -9511,24 +9511,28 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
         subdominio = config.get('subdominio_actual') or config.get('dominio', 'mektia').split('.')[0]
 
         # 3. CONTEXTO DINÁMICO
+        hay_productos = False
         contexto_productos = ""
+        
         if catalog_list and len(catalog_list) > 0:
+            hay_productos = True
             contexto_productos = "\nPRODUCTOS/CURSOS DISPONIBLES:\n"
             for p in catalog_list:
                 contexto_productos += f"- {p.get('nombre')}: ${p.get('precio_menudeo')}\n"
         else:
             contexto_productos = f"\nINFORMACIÓN GENERAL: {que_hace}"
 
-        # 4. SYSTEM PROMPT (Identidad en el primer mensaje)
+        # 4. SYSTEM PROMPT (ADN Dinámico)
         system_prompt = f"""
         Eres {ia_nombre}, el asistente oficial de {negocio_nombre}.
         Misión: {que_hace}
         {contexto_productos}
 
-        REGLAS:
-        1. NUNCA menciones a 'Mektia'. Tu mundo es {negocio_nombre}.
-        2. Si el usuario pregunta qué ofreces, usa la información de arriba.
-        3. Formato obligatorio: JSON.
+        REGLAS DE RESPUESTA:
+        1. Responde siempre como {ia_nombre}.
+        2. NUNCA menciones a 'Mektia'. Tu mundo es {negocio_nombre}.
+        3. Si preguntan por precios, usa la lista de arriba.
+        4. IMPORTANTE: Tu respuesta DEBE estar en formato JSON.
         """
 
         lista_mensajes = [{"role": "system", "content": system_prompt}]
@@ -9556,8 +9560,6 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
         resp.raise_for_status()
         
         res_raw = resp.json()['choices'][0]['message']['content']
-        
-        # PARCHE DE FORMATO: Convertimos saltos para el panel web
         res_raw = res_raw.replace('\\n', '<br>')
         
         decision = json.loads(res_raw)
@@ -9566,9 +9568,12 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
         intent = decision.get('intent', 'INFORMACION').upper()
         notify_asesor = bool(decision.get('notify_asesor'))
 
-        # 6. FILTRO DE PREVALENCIA (Bloqueo de asesor si hay info)
-        if hay_productos and not any(w in texto.lower() for w in ["asesor", "humano", "persona"]):
-            if intent == "PASAR_ASESOR" or notify_asesor:
+        # 6. FILTRO DE PREVALENCIA (Ya no va a fallar porque definimos hay_productos arriba)
+        palabras_humano = ["asesor", "humano", "persona", "hablar con alguien"]
+        usuario_quiere_humano = any(w in texto.lower() for w in palabras_humano)
+
+        if hay_productos and not usuario_quiere_humano:
+            if intent == "PASAR_ASESOR" or notify_asesor is True:
                 intent = "INFORMACION"
                 notify_asesor = False
                 
