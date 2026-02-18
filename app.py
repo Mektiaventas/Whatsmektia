@@ -11109,33 +11109,13 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
     return None
   
 def obtener_configuracion_por_host():
-    from flask import request
-    from services import get_cliente_by_subdomain
-    try:
-        raw_host = request.host.lower().split(':')[0]
-        subdominio = raw_host.split('.')[0]
-        config_bd = get_cliente_by_subdomain(subdominio)
-        if config_bd:
-            return {
-                # ESTA ES LA LLAVE QUE FALTA Y CAUSA EL KEYERROR
-                'db_host': os.getenv('DB_HOST', '127.0.0.1'), 
-                'db_name': config_bd['shema'],
-                'db_user': config_bd['user'],
-                'db_password': config_bd['password'],
-                'whatsapp_token': config_bd['wa_token'],
-                'phone_number_id': config_bd['wa_phone_id'],
-                'verify_token': config_bd['wa_verify_token'],
-                'subdominio_actual': subdominio
-            }
-        # Si no hay nada en BD, fallback al default de Mektia
-        # Asegúrate de que este diccionario también tenga 'db_host'
-        default_conf = NUMEROS_CONFIG.get('524495486824').copy()
-        if 'db_host' not in default_conf:
-            default_conf['db_host'] = os.getenv('DB_HOST', '127.0.0.1')
-        return default_conf
-    except Exception as e:
-        app.logger.error(f"🔴 Error en obtener_configuracion_por_host: {e}")
-        return NUMEROS_CONFIG.get('524495486824')
+    raw_host = request.host.lower().split(':')[0]
+    subdominio = raw_host.split('.')[0]
+    # El servicio ya entrega el diccionario con 'db_host' incluido
+    config = get_cliente_by_subdomain(subdominio)
+    if config:
+        return config # <--- Cero retrabajo, ya viene listo.
+    return NUMEROS_CONFIG.get('524495486824')
     
 @app.route('/diagnostico')
 def diagnostico():
