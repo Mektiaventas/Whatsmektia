@@ -81,28 +81,17 @@ def get_db_connection(config=None):
             logger.error(f"❌ Error connecting to DB {config.get('db_name')}: {e}")
             raise
 
+# services.py
+
 def get_cliente_by_subdomain(subdominio):
-    """
-    Une 'usuarios' y 'cliente' para obtener la configuración completa.
-    Esto elimina el hardcode y centraliza todo en la BD.
-    """
     try:
         conn = get_clientes_conn()
         cur = conn.cursor(dictionary=True)
-        
-        # El JOIN es la clave: 
-        # Traemos datos de la base de datos desde 'usuarios' (u)
-        # y los tokens de WhatsApp desde 'cliente' (c)
         query = """
             SELECT 
-                u.id_cliente, 
-                u.user, 
-                u.password, 
-                u.shema,
-                c.wa_token, 
-                c.wa_phone_id, 
-                c.wa_verify_token, 
-                c.dominio
+                u.id_cliente, u.user as db_user, u.password as db_password, u.shema as db_name,
+                c.wa_token as whatsapp_token, c.wa_phone_id as phone_number_id, 
+                c.wa_verify_token as verify_token, c.dominio
             FROM usuarios u
             JOIN cliente c ON u.id_cliente = c.id
             WHERE c.dominio = %s OR u.shema = %s
@@ -110,13 +99,18 @@ def get_cliente_by_subdomain(subdominio):
         """
         cur.execute(query, (subdominio, subdominio))
         resultado = cur.fetchone()
-        
         cur.close()
         conn.close()
-        return resultado
+        if resultado:
+            # AGREGAMOS EL HOST AQUÍ, EN EL SERVICIO
+            # Así app.py no tiene que saber nada de esto.
+            resultado['db_host'] = os.getenv('DB_HOST', '127.0.0.1')
+            return resultado
+        return None
     except Exception as e:
         logger.error(f"❌ Error en get_cliente_by_subdomain: {e}")
         return None
+        
 def _ensure_precios_subscription_columns(config=None):
     """
     Ensure `precios` table has 'inscripcion' and 'mensualidad' columns.
