@@ -41,16 +41,15 @@ def get_cliente_by_subdomain(subdominio):
         conn = get_db_connection({'db_name': 'clientes'})
         cur = conn.cursor(dictionary=True)
         
-        # Ajustamos el query a las columnas que REALMENTE tienes
-        # Usamos 'dominio' para identificar al cliente y traemos el 'wa_token'
-        # Nota: Ajusta el nombre de la tabla (aqui puse 'configuracion') si se llama distinto
+        # Buscamos por la columna 'dominio'
         query = """
             SELECT 
-                dominio as subdominio, 
+                dominio as db_name, 
                 wa_token, 
                 wa_phone_id, 
-                dominio as db_name 
-            FROM configuracion 
+                wa_verify_token,
+                'localhost' as db_host
+            FROM cliente 
             WHERE dominio = %s LIMIT 1
         """
         cur.execute(query, (subdominio,))
@@ -60,5 +59,5 @@ def get_cliente_by_subdomain(subdominio):
         conn.close()
         return res
     except Exception as e:
-        logger.error(f"⚠️ Error buscando subdominio {subdominio}: {e}")
+        logger.error(f"⚠️ Error consultando tabla clientes.cliente: {e}")
         return None
