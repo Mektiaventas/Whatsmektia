@@ -4960,7 +4960,52 @@ def seleccionar_mejor_doc(docs, query):
         app.logger.warning(f"⚠️ seleccionar_mejor_doc error: {e}")
         return docs[0] if docs else None
 
-# app.py (Agregar nueva función de DB)
+def ejecutar_envio_pdf_inteligente(numero, texto, config):
+    """
+    La evolución: Usa el cerebro de seleccionar_mejor_doc 
+    con la robustez de envío de enviar_catalogo.
+    """
+    try:
+        # 1. Obtener los documentos del tenant actual
+        from services import get_db_connection
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        tenant_slug = config.get('subdominio', 'default').lower()
+        query_db = "SELECT * FROM documents_publicos WHERE tenant_slug = %s"
+        cursor.execute(query_db, (tenant_slug,))
+        docs = cursor.fetchall()
+
+        if not docs:
+            app.logger.warning(f"⚠️ No hay PDFs para {tenant_slug}")
+            return False
+
+        # 2. USAR EL CEREBRO (Línea 4823)
+        # Aquí 'texto' es lo que el usuario escribió (ej: "pásame el temario de mecatrónica")
+        doc_seleccionado = seleccionar_mejor_doc(docs, texto)
+
+        if doc_seleccionado:
+            filename = doc_seleccionado['filename']
+            # Construcción dinámica de URL
+            url_documento = f"https://{request.host}/static/uploads/docs/{tenant_slug}/{filename}"
+            display_name = (doc_seleccionado['descripcion'] or "Documento").strip()[:40]
+            
+            app.logger.info(f"✅ PDF Encontrado: {filename}. Enviando...")
+            from whatsapp import enviar_documento
+            return enviar_documento(numero, url_documento, display_name, config)
+        else:
+            # Si el score fue bajo, enviamos la lista de opciones (como hacía enviar_catalogo)
+            opciones = "\n".join([f"• {d.get('descripcion') or d.get('filename')}" for d in docs[:5]])
+            enviar_mensaje(numero, f"No encontré un documento exacto, pero tengo estos disponibles:\n{opciones}", config)
+            return True
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en flujo PDF: {e}")
+        return False
+    finally:
+        if 'conn' in locals() and conn.is_connected():
+            cursor.close()
+            conn.close()
 
 def obtener_id_columna_por_nombre(nombre_columna, config=None):
     """Busca el ID de una columna Kanban por su nombre (matching case-insensitive)."""
