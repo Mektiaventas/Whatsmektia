@@ -11110,25 +11110,24 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
   
 def obtener_configuracion_por_host():
     from flask import request
-    # 1. Detectamos quién nos visita
+    from services import get_cliente_by_subdomain
     raw_host = request.host.lower().split(':')[0]
     subdominio = raw_host.split('.')[0]
-    # 2. Le pedimos a servicios que haga su magia (AUTOMÁTICO)
-    cliente_bd = get_cliente_by_subdomain(subdominio)
-    if cliente_bd:
-        # 3. Armamos la config con lo que diga la BD, no el código
+    # La BD ahora hace todo el trabajo
+    config_bd = get_cliente_by_subdomain(subdominio)
+    if config_bd:
         return {
-            'id_cliente': cliente_bd['id_cliente'],
-            'db_host': os.getenv('DB_HOST', '127.0.0.1'),
-            'db_user': cliente_bd['user'],
-            'db_password': cliente_bd['password'],
-            'db_name': cliente_bd['shema'],
-            'subdominio_actual': subdominio,
-            'whatsapp_token': cliente_bd.get('wa_token'),
-            'phone_number_id': cliente_bd.get('wa_phone_id')
+            'db_name': config_bd['shema'],
+            'db_user': config_bd['user'],
+            'db_password': config_bd['password'],
+            'whatsapp_token': config_bd['wa_token'],
+            'phone_number_id': config_bd['wa_phone_id'],
+            'verify_token': config_bd['wa_verify_token'],
+            'subdominio_actual': subdominio
         }
-    # 4. Si es alguien desconocido, Mektia por default
+    # Si no existe, regresa Mektia por defecto
     return NUMEROS_CONFIG.get('524495486824')
+    
 @app.route('/diagnostico')
 def diagnostico():
     """Endpoint de diagnóstico corregido sin 'Unread result found'"""
