@@ -9,15 +9,12 @@ _MYSQL_POOLS = {}
 
 def get_db_connection(config=None):
     cfg = config if config else {}
-    
-    # Si no especifican BD, el default ahora es 'mektia' (la nueva limpia)
+    # El default ahora es 'mektia' (la nueva base limpia)
     db_name = cfg.get('db_name', 'mektia')
     db_host = cfg.get('db_host', 'localhost')
     user = 'mektia'
     password = 'Mektia#2025'
-    
     pool_key = f"{db_host}|{user}|{db_name}"
-
     if pool_key not in _MYSQL_POOLS:
         try:
             _MYSQL_POOLS[pool_key] = pooling.MySQLConnectionPool(
@@ -29,11 +26,10 @@ def get_db_connection(config=None):
                 database=db_name,
                 charset='utf8mb4'
             )
-            logger.info(f"✅ Pool de conexiones creado para: {db_name}")
+            logger.info(f"✅ Conexión establecida a BD: {db_name}")
         except Exception as e:
-            logger.error(f"❌ Error crítico conectando a {db_name}: {e}")
+            logger.error(f"❌ Error conectando a {db_name}: {e}")
             raise
-    
     return _MYSQL_POOLS[pool_key].get_connection()
 def get_cliente_by_subdomain(subdominio):
     try:
