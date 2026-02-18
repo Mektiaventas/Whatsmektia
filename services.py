@@ -81,6 +81,28 @@ def get_db_connection(config=None):
             logger.error(f"❌ Error connecting to DB {config.get('db_name')}: {e}")
             raise
 
+def get_cliente_by_subdomain(subdominio):
+    """
+    Función ÚNICA y CENTRALIZADA para identificar clientes.
+    Migrada desde app.py para automatizar todo.
+    """
+    try:
+        conn = get_clientes_conn() # La conexión que YA tienes en services
+        cur = conn.cursor(dictionary=True)
+        # Buscamos por todas las posibilidades en una sola vuelta
+        query = """
+            SELECT * FROM usuarios 
+            WHERE shema = %s OR entorno = %s OR `user` = %s 
+            LIMIT 1
+        """
+        cur.execute(query, (subdominio, subdominio, subdominio))
+        cliente = cur.fetchone()
+        cur.close()
+        conn.close()
+        return cliente
+    except Exception as e:
+        logger.error(f"❌ Error en get_cliente_by_subdomain: {e}")
+        return None
 def _ensure_precios_subscription_columns(config=None):
     """
     Ensure `precios` table has 'inscripcion' and 'mensualidad' columns.
