@@ -9552,16 +9552,37 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
         
         lista_mensajes.append({"role": "user", "content": texto})
 
-        # 5. LLAMADA A LA API (Con temperatura baja para evitar alucinaciones)
+        # 5. LLAMADA A LA API
         api_key = os.getenv('DEEPSEEK_API_KEY')
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         payload = {
             "model": "deepseek-chat", 
             "messages": lista_mensajes, 
             "response_format": {"type": "json_object"},
-            "temperature": 0.2 
+            "temperature": 0.2
         }
-        # 6. FILTRO DE PREVALENCIA (Ya no va a fallar porque definimos hay_productos arriba)
+        
+        # Valores por defecto para evitar que el código truene si la API falla
+        mensaje_para_cliente = "Lo siento, tuve un problema técnico. ¿Puedes repetir?"
+        intent = "INFORMACION"
+        notify_asesor = False
+
+        try:
+            resp = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload, timeout=15)
+            resp.raise_for_status()
+            
+            res_raw = resp.json()['choices'][0]['message']['content']
+            res_raw = res_raw.replace('\\n', '<br>')
+            
+            decision = json.loads(res_raw)
+            
+            mensaje_para_cliente = decision.get('respuesta_text') or "Claro, dime en qué te ayudo."
+            intent = (decision.get('intent') or "INFORMACION").upper()
+            notify_asesor = bool(decision.get('notify_asesor'))
+        except Exception as e:
+            print(f"❌ Error llamando a DeepSeek: {e}")
+
+        # 6. FILTRO DE PREVALENCIA (Ya no tronará porque intent y notify_asesor existen arriba)
         palabras_humano = ["asesor", "humano", "persona", "hablar con alguien"]
         usuario_quiere_humano = any(w in texto.lower() for w in palabras_humano)
 
