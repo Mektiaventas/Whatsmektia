@@ -9510,37 +9510,26 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
         # Intentamos obtener el subdominio de 3 formas para que NUNCA sea "NO DEFINIDO"
         subdominio = config.get('subdominio_actual') or config.get('dominio', 'mektia').split('.')[0]
 
-        # 3. REGLA DE ORO: Inyectar contexto de "Qué hace" si no hay productos específicos
-        contexto_real = ""
-        hay_productos = False
-        
+        # 3. CONTEXTO DINÁMICO
+        contexto_productos = ""
         if catalog_list and len(catalog_list) > 0:
-            hay_productos = True
-            contexto_real = "\n\nESTOS PRODUCTOS ESTÁN DISPONIBLES AHORA (Úsalos para responder):\n"
+            contexto_productos = "\nPRODUCTOS/CURSOS DISPONIBLES:\n"
             for p in catalog_list:
-                contexto_real += f"- {p.get('nombre')}: ${p.get('precio_menudeo')}\n"
+                contexto_productos += f"- {p.get('nombre')}: ${p.get('precio_menudeo')}\n"
         else:
-            # SI NO HAY PRODUCTOS BUSCADOS, DALE SU LISTA GENERAL DE QUÉ HACE
-            contexto_real = f"\n\nINFORMACIÓN GENERAL DE LO QUE OFRECEMOS EN {negocio_nombre}:\n{que_hace}"
+            contexto_productos = f"\nINFORMACIÓN GENERAL: {que_hace}"
 
-        # 4. SYSTEM PROMPT REFORZADO (Añadimos instrucción de precios)
+        # 4. SYSTEM PROMPT (Identidad en el primer mensaje)
         system_prompt = f"""
-Eres {ia_nombre}, el asistente estrella de {negocio_nombre}.
-Misión: {que_hace}
+        Eres {ia_nombre}, el asistente oficial de {negocio_nombre}.
+        Misión: {que_hace}
+        {contexto_productos}
 
-REGLAS DE RESPUESTA:
-1. Si el usuario pregunta qué ofreces o pide precios, usa ESTRICTAMENTE esta información: {contexto_real}
-2. NUNCA menciones a 'Mektia' ni servicios de otras empresas. Tu mundo es {negocio_nombre}.
-3. Si el usuario es vago (ej. "Hola"), saluda y menciona brevemente 2 cosas que haces según el contexto proporcionado.
-4. Siempre que menciones un precio, asegúrate que sea el que aparece en la lista.
-
-Formato JSON:
-{{
-  "intent": "INFORMACION",
-  "respuesta_text": "En {negocio_nombre} ofrecemos...",
-  "notify_asesor": false
-}}
-"""
+        REGLAS:
+        1. NUNCA menciones a 'Mektia'. Tu mundo es {negocio_nombre}.
+        2. Si el usuario pregunta qué ofreces, usa la información de arriba.
+        3. Formato obligatorio: JSON.
+        """
 
         lista_mensajes = [{"role": "system", "content": system_prompt}]
         
@@ -9551,12 +9540,7 @@ Formato JSON:
                 if u: lista_mensajes.append({"role": "user", "content": u})
                 if a: lista_mensajes.append({"role": "assistant", "content": a})
         
-        # --- AQUÍ EMPIEZA EL REEMPLAZO ---
-        # Separamos la pregunta del catálogo para que la IA no se haga bolas
-        contexto_texto = f"\n\n### DATOS DEL NEGOCIO Y PRECIOS:\n{contexto_real}" if contexto_real else ""
-        contenido_usuario = f"Pregunta del Cliente: {texto}{contexto_texto}"
-        
-        lista_mensajes.append({"role": "user", "content": contenido_usuario})
+        lista_mensajes.append({"role": "user", "content": texto})
 
         # 5. LLAMADA A LA API
         api_key = os.getenv('DEEPSEEK_API_KEY')
@@ -9573,8 +9557,7 @@ Formato JSON:
         
         res_raw = resp.json()['choices'][0]['message']['content']
         
-        # PARCHE DE FORMATO: Convertimos los saltos de línea para el panel web
-        app.logger.info("🚩 IA: Ejecutando llamada en el bloque que editamos")
+        # PARCHE DE FORMATO: Convertimos saltos para el panel web
         res_raw = res_raw.replace('\\n', '<br>')
         
         decision = json.loads(res_raw)
@@ -9583,17 +9566,12 @@ Formato JSON:
         intent = decision.get('intent', 'INFORMACION').upper()
         notify_asesor = bool(decision.get('notify_asesor'))
 
-        # 6. FILTRO DE PREVALENCIA
-        palabras_humano = ["asesor", "humano", "persona", "hablar con alguien"]
-        usuario_quiere_humano = any(w in texto.lower() for w in palabras_humano)
-
-        if hay_productos and not usuario_quiere_humano:
-            if intent == "PASAR_ASESOR" or notify_asesor is True:
-                app.logger.info("🛡️ Bloqueando transferencia: IA tiene productos para mostrar.")
+        # 6. FILTRO DE PREVALENCIA (Bloqueo de asesor si hay info)
+        if hay_productos and not any(w in texto.lower() for w in ["asesor", "humano", "persona"]):
+            if intent == "PASAR_ASESOR" or notify_asesor:
                 intent = "INFORMACION"
                 notify_asesor = False
-        # --- AQUÍ TERMINA EL REEMPLAZO ---
-
+                
         # 7. LÓGICA DE AUDIO (TTS)
         audio_url_publica = None
         if es_audio and mensaje_para_cliente:
