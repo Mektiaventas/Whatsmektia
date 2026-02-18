@@ -10302,7 +10302,8 @@ EJEMPLOS:
         
 def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
     """
-    Función extraída: Mantiene la lógica EXACTA de producción.
+    Función unificada: Maneja detección de intención, charla general 
+    y envío de fichas técnicas (Imagen + Texto) en un solo mensaje.
     """
     try:
         # --- DeepSeek Product & Visual Intent Detection ---
@@ -10385,8 +10386,8 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
         elif "SI_APLICA" in raw_ds:
             producto_aplica = "SI_APLICA"
         else:
-             m = re.search(r'\b(SI_APLICA|NO_APLICA)\b', raw_ds.upper())
-             if m: producto_aplica = m.group(1)
+            m = re.search(r'\b(SI_APLICA|NO_APLICA)\b', raw_ds.upper())
+            if m: producto_aplica = m.group(1)
         app.logger.info(f"🔎 DeepSeek result -> {producto_aplica}")
 
     except Exception as e:
@@ -10432,30 +10433,15 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
             productos_para_ficha = precios_imagenes[:cantidad_imagenes]
             app.logger.info(f"⏳ Cascada finalizada. Mostrando {len(productos_para_ficha)} fichas.")
 
+        # Priorizar SKUs detectados en el texto
         for p in precios[:5]:
             img_url = p.get('imagen')
             sku_p = p.get('sku', '')
             if img_url and sku_p and sku_p.lower() in texto.lower():
                 if p not in productos_para_ficha: productos_para_ficha.insert(0, p)
 
-        if len(precios) < 30:
-            cat_det = detectar_categoria_del_mensaje(texto)
-            if cat_det:
-                prods = obtener_productos_por_categoria(cat_det, config, limite=100)
-                skus = {p.get('sku') for p in precios}
-                for prod in prods:
-                    if prod.get('sku') not in skus: precios.append(prod)
-        
-        if len(precios) < 40:
-            todos = obtener_todos_los_precios(config) or []
-            skus = {p.get('sku') for p in precios}
-            c = 0
-            for ex in todos[:60]:
-                if ex.get('sku') not in skus and c < 30:
-                    precios.append(ex)
-                    c += 1
-    
     else:
+        # --- BLOQUE DE CHARLA GENERAL (CUANDO NO HAY PRODUCTOS) ---
         try:
             data_db = load_config(config)
             if data_db and 'negocio' in data_db:
@@ -10464,13 +10450,6 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
                 config.update(data_db['restricciones'])
         except Exception as e:
             app.logger.error(f"❌ Falló load_config en el else: {e}")
-
-        app.logger.error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        app.logger.error(f"🚨 DEBUG COMPLETO CONFIG: {list(config.keys()) if config else 'CONFIG ES NONE'}")
-        subdominio_log = config.get('subdominio_actual', 'desconocido') 
-        app.logger.error(f"🏢 SUBDOMINIO DETECTADO: {subdominio_log}")
-        app.logger.error(f"🚨 DEBUG IDENTIDAD: {config.get('ia_nombre', 'Sin nombre')}")
-        app.logger.error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
         
         app.logger.info(f"📦 Consulta general (Charla/Identidad), llamando a IA...")
         generar_respuesta_deepseek(numero=numero, texto=texto, precios=[], 
@@ -10478,20 +10457,28 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
                                     config=config, incoming_saved=incoming_saved, es_audio=es_audio)
         return True 
 
-    # --- Ejecución final ---
-    generar_respuesta_deepseek(numero=numero, texto=texto, precios=precios, 
-                                historial=obtener_historial(numero, limite=6, config=config),
-                                config=config, incoming_saved=incoming_saved, es_audio=es_audio)
+    # --- EJECUCIÓN FINAL (CUANDO SÍ HAY PRODUCTOS) ---
+    
+    # Si vamos a enviar fichas, forzamos a la IA a ser breve en su saludo
+    if productos_para_ficha:
+        texto_instruccion = f"BREVE: El usuario busca '{contexto_busqueda}'. Saluda y di que aquí tiene la información."
+        generar_respuesta_deepseek(numero=numero, texto=texto_instruccion, precios=precios, 
+                                    historial=obtener_historial(numero, limite=6, config=config),
+                                    config=config, incoming_saved=incoming_saved, es_audio=es_audio)
+    else:
+        # Si solo enviará texto de precios sin imágenes
+        generar_respuesta_deepseek(numero=numero, texto=texto, precios=precios, 
+                                    historial=obtener_historial(numero, limite=6, config=config),
+                                    config=config, incoming_saved=incoming_saved, es_audio=es_audio)
 
+    # Envío de fichas unificadas (Imagen + Texto técnico)
     if productos_para_ficha:
         app.logger.info(f"🚀 Enviando {len(productos_para_ficha)} fichas unificadas...")
-        envios_exitosos = 0
         for p in productos_para_ficha:
             img_url = p.get('imagen')
             sku_p = p.get('sku', '') or 'S/N'
             titulo_ficha = p.get('sku') or p.get('modelo') or 'Producto'
             
-            # 1. Armamos el texto de la ficha
             lineas_precios = []
             mapeo_precios = [('precio_menudeo', '💲 Precio Menudeo'), ('precio_mayoreo', '📦 Precio Mayoreo'),
                             ('inscripcion', '💰 Inscripción'), ('mensualidad', '💳 Mensualidad'), ('precio', '💵 Precio')]
@@ -10505,24 +10492,23 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
             precios_detalle = "\n".join(lineas_precios) if lineas_precios else "💲 Precio: Consultar"
             medidas_val = str(p.get('medidas') or "").strip()
             texto_medidas = f"📏 Medidas: {medidas_val}\n" if medidas_val and medidas_val not in ['0', '0.00', ''] else ""
-            descripcion_corta = (p.get('descripcion') or '')[:120]
-            if len(p.get('descripcion') or '') > 120: descripcion_corta += "..."
+            
+            desc_raw = p.get('descripcion') or ''
+            descripcion_corta = (desc_raw[:120] + "...") if len(desc_raw) > 120 else desc_raw
 
-            # Este es el texto final
+            # El caption de la imagen
             ficha_texto = (f"🔹 *{titulo_ficha}*\n{precios_detalle}\n{texto_medidas}📝 {descripcion_corta}\n🆔 SKU: {sku_p}")
 
-            # 2. Enviamos TODO en un solo comando
             if img_url and img_url.strip():
                 try:
-                    # USAMOS EL PARÁMETRO 'texto' DENTRO DE ENVIAR_IMAGEN
+                    # Enviar UN SOLO mensaje con imagen y texto
                     enviar_imagen(numero, img_url, texto=ficha_texto, config=config)
                     
-                    # Guardamos para el historial web
+                    # Log para el panel web
                     texto_para_web = f"<b>{titulo_ficha}</b><br>{precios_detalle}<br>{texto_medidas}<br>📝 {descripcion_corta}<br>🆔 SKU: {sku_p}"
                     actualizar_respuesta(numero, texto, texto_para_web, config, respuesta_tipo='imagen', respuesta_media_url=img_url)
                     
-                    envios_exitosos += 1
-                    time.sleep(1.2) # Pausa para no saturar WhatsApp
+                    time.sleep(1.2)
                 except Exception as e:
                     app.logger.error(f"❌ Error enviando ficha: {e}")
 
