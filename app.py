@@ -7223,14 +7223,17 @@ def serve_public_docs(relpath):
         abort(500)
 
 def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo='texto', respuesta_media_url=None, productos_data=None):
-    # --- PARCHE DE FORMATO PARA PANEL WEB (Asegúrate de que haya 4 espacios aquí) ---
+    # --- PARCHE DE FORMATO PARA PANEL WEB ---
+    import re  # Aseguramos que re esté disponible
     if respuesta and isinstance(respuesta, str):
-        import re
-        # Si NO tiene etiquetas de negrita HTML, procesamos el texto plano de la IA
+        # Si NO tiene etiquetas HTML de negrita, es texto plano de la IA
         if "<b>" not in respuesta:
+            # Primero convertimos los saltos de línea (\n) a etiquetas HTML (<br>)
             respuesta = respuesta.replace('\n', '<br>')
+            # Luego convertimos los *texto* de la IA a <b>texto</b>
             respuesta = re.sub(r'\*(.*?)\*', r'<b>\1</b>', respuesta)
     # ----------------------------------------
+
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -7263,7 +7266,7 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo
             WHERE numero = %s 
               AND mensaje = %s 
               AND respuesta IS NULL 
-            ORDER BY timestamp DESC 
+            ORDER BY id DESC 
             LIMIT 1
         """, (respuesta, respuesta_tipo, respuesta_media_url, dominio_actual, numero, mensaje_limpio_para_buscar))
         
@@ -7279,7 +7282,11 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo
         conn.close()
         return True
     except Exception as e:
-        app.logger.error(f"❌ TRACKING: Error en actualizar_respuesta: {e}")
+        # Usamos try/except para el log por si app.logger no está definido en el alcance
+        try:
+            app.logger.error(f"❌ TRACKING: Error en actualizar_respuesta: {e}")
+        except:
+            print(f"❌ TRACKING: Error en actualizar_respuesta: {e}")
         return False
         
 def obtener_asesores_por_user(username, default=2, cap=20):
