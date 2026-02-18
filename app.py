@@ -11109,78 +11109,26 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
     return None
   
 def obtener_configuracion_por_host():
-    """Obtiene la configuración basada en el host de forma dinámica y segura"""
-    try:
-        from flask import has_request_context, request
-        if not has_request_context():
-            return NUMEROS_CONFIG['524495486824']  # Default Mektia
-
-        # LIMPIEZA DEL HOST (La magia)
-        # Esto convierte 'unilova.mektia.com:5000' en 'unilova.mektia.com'
-        raw_host = request.host.lower().split(':')[0]
-        
-        config = None
-        subdominio = "mektia"  # Default inicial
-
-        # 1. BÚSQUEDA DINÁMICA (Para no tener que escribir cada cliente)
-        # Recorremos NUMEROS_CONFIG buscando si el host aparece en alguna configuración
-        for key, valor in NUMEROS_CONFIG.items():
-            # Si el dominio del cliente está en el host que pide el navegador
-            conf_dominio = valor.get('dominio', '').lower()
-            if conf_dominio and conf_dominio in raw_host:
-                config = valor
-                # Intentamos extraer el subdominio del host (ej: 'unilova')
-                subdominio = raw_host.split('.')[0]
-                break
-
-        # 2. BACKUP MANUAL (Tus IFs actuales por si el diccionario no tiene la llave 'dominio')
-        if not config:
-            if 'unilova' in raw_host:
-                config = NUMEROS_CONFIG.get('123')
-                subdominio = "unilova"
-            elif 'smartwhats' in raw_host:
-                config = NUMEROS_CONFIG.get('524495486824')
-                subdominio = "smartwhats"
-            elif 'laporfirianna' in raw_host:
-                config = NUMEROS_CONFIG.get('524812372326')
-                subdominio = "laporfirianna"
-            elif 'ofitodo' in raw_host:
-                config = NUMEROS_CONFIG.get('524495486324')
-                subdominio = "ofitodo"
-            elif 'maindsteel' in raw_host:
-                config = NUMEROS_CONFIG.get('1011')
-                subdominio = "maindsteel"
-            elif 'supagprueba' in raw_host:
-                config = NUMEROS_CONFIG.get('000')
-                subdominio = "supagprueba"
-            elif 'soin3' in raw_host:
-                config = NUMEROS_CONFIG.get('003')
-                subdominio = "soin3"
-            elif 'drasgo' in raw_host:
-                config = NUMEROS_CONFIG.get('1012')
-                subdominio = "drasgo"
-            elif 'lacse' in raw_host:
-                config = NUMEROS_CONFIG.get('1111111111111')
-                subdominio = "lacse"
-            elif 'strato' in raw_host:
-                config = NUMEROS_CONFIG.get('524495547200')
-                subdominio = "strato"
-
-        # 3. SEGURO DE VIDA (Si nada coincidió, entregamos Mektia para que no truene)
-        if config is None:
-            app.logger.warning(f"⚠️ Host no reconocido: {raw_host}. Usando configuración default.")
-            config = NUMEROS_CONFIG['524495486824']
-            subdominio = "mektia"
-
-        # LA PIEZA CLAVE (Ahora sí se ejecuta siempre):
-        config['subdominio_actual'] = subdominio
-        return config
-            
-    except Exception as e:
-        app.logger.error(f"🔴 Error en obtener_configuracion_por_host: {e}")
-        # Retorno de emergencia para evitar el AttributeError: 'NoneType'
-        return NUMEROS_CONFIG['524495486824']
-
+    from flask import request
+    # 1. Detectamos quién nos visita
+    raw_host = request.host.lower().split(':')[0]
+    subdominio = raw_host.split('.')[0]
+    # 2. Le pedimos a servicios que haga su magia (AUTOMÁTICO)
+    cliente_bd = get_cliente_by_subdomain(subdominio)
+    if cliente_bd:
+        # 3. Armamos la config con lo que diga la BD, no el código
+        return {
+            'id_cliente': cliente_bd['id_cliente'],
+            'db_host': os.getenv('DB_HOST', '127.0.0.1'),
+            'db_user': cliente_bd['user'],
+            'db_password': cliente_bd['password'],
+            'db_name': cliente_bd['shema'],
+            'subdominio_actual': subdominio,
+            'whatsapp_token': cliente_bd.get('wa_token'),
+            'phone_number_id': cliente_bd.get('wa_phone_id')
+        }
+    # 4. Si es alguien desconocido, Mektia por default
+    return NUMEROS_CONFIG.get('524495486824')
 @app.route('/diagnostico')
 def diagnostico():
     """Endpoint de diagnóstico corregido sin 'Unread result found'"""
