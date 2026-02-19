@@ -8307,7 +8307,7 @@ def messenger_webhook():
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
-        # Basic validation
+        # 1. Validaciones básicas del Payload
         if not request.is_json:
             app.logger.error("🔴 Webhook: no JSON payload")
             return 'Invalid content type', 400
@@ -8318,27 +8318,35 @@ def webhook():
 
         app.logger.info(f"📥 Webhook payload: {json.dumps(payload)[:800]}")
 
-        # Basic structure checks
         if 'entry' not in payload or not payload['entry']:
             app.logger.error("🔴 Webhook: missing entry")
             return 'Invalid payload structure', 400
+        
         entry = payload['entry'][0]
         if 'changes' not in entry or not entry['changes']:
             app.logger.error("🔴 Webhook: missing changes")
             return 'Invalid entry structure', 400
 
         change = entry['changes'][0]['value']
-        # --- AÑADE ESTO AQUÍ ---
+
+        # 2. Ignorar actualizaciones de estado (sent, delivered, read)
         if 'statuses' in change:
             return 'OK', 200
-        # -----------------------
+
         mensajes = change.get('messages', [])
         if not mensajes:
             app.logger.info("⚠️ Webhook: no messages in payload")
             return 'OK', 200
 
-        # Try to persist contact info if provided (contacts structure)
-        # 1. Extraer nombre del contacto (si viene en el payload) para usarlo después
+        # 3. IDENTIFICACIÓN DINÁMICA DEL TENANT (Configuración Completa)
+        # Usamos el Host para garantizar que cargamos la personalidad (IA, Negocio, que_hace)
+        config = obtener_configuracion_por_host()
+        
+        metadata = change.get('metadata', {})
+        phone_number_id = metadata.get('phone_number_id')
+        app.logger.info(f"📞 Webhook recibido para Phone ID: {phone_number_id} | Host: {request.host}")
+
+        # 4. Extraer nombre del contacto del perfil de WhatsApp
         nombre_whatsapp = None
         try:
             if 'contacts' in change:
@@ -8348,59 +8356,48 @@ def webhook():
         except Exception as e:
             app.logger.warning(f"⚠️ No se pudo extraer nombre del contacto: {e}")
 
-        # Main message
+        # 5. Datos del mensaje principal
         msg = mensajes[0]
         numero = msg.get('from')
         if not numero:
             app.logger.error("🔴 Webhook: message without 'from'")
             return 'OK', 200
 
-        # --- ESTO ES LO QUE CAMBIAS ---
-        metadata = change.get('metadata', {})
-        phone_number_id = metadata.get('phone_number_id')
-        
-        app.logger.info(f"📞 Webhook recibido para Phone ID: {phone_number_id}")
-
-        # Intentar buscar por Phone ID primero (es lo más seguro)
-        config = None
-        if phone_number_id:
-            config = obtener_configuracion_por_phone_number_id(phone_number_id)
-
-        # Si no se encontró por ID, intentar por Host (como respaldo)
-        if not config:
-            app.logger.warning(f"⚠️ No se encontró config para ID {phone_number_id}, usando Host")
-            config = obtener_configuracion_por_host()
-        # ------------------------------
-        # Ensure kanban/chat meta/contact are present (quick pre-check)
+        # 6. Inicialización de metadatos de chat y contacto
         try:
             inicializar_chat_meta(numero, config)
-            # 2. Pasamos el nombre extraído a la función de actualización
             actualizar_info_contacto(numero, config, nombre_perfil=nombre_whatsapp) 
         except Exception as e:
             app.logger.warning(f"⚠️ pre-processing kanban/contact failed: {e}")
-        # Deduplication by message id
+
+        # 7. Deduplicación de mensajes por ID (Evita procesar 2 veces lo mismo)
         message_id = msg.get('id')
         if not message_id:
             app.logger.error("🔴 Webhook: message without id, cannot dedupe reliably")
             return 'OK', 200
+        
+        import hashlib
         message_hash = hashlib.md5(f"{numero}_{message_id}".encode()).hexdigest()
-        # quick duplicate check
+        
         if message_hash in processed_messages:
             app.logger.info(f"⚠️ Duplicate webhook delivery ignored: {message_hash}")
             return 'OK', 200
+        
         processed_messages[message_hash] = time.time()
-        # cleanup old keys
+        
+        # Limpieza de caché de duplicados (mensajes de más de 1 hora)
         now_ts = time.time()
         for h, ts in list(processed_messages.items()):
             if now_ts - ts > 3600:
                 del processed_messages[h]
 
-        # Parse incoming content (text / image / audio / document)
+        # 8. Procesamiento de contenido (Texto, Imagen, Audio, Documento)
         texto = ''
         es_imagen = es_audio = es_archivo = False
         imagen_base64 = None
         public_url = None
         transcripcion = None
+        audio_url = None
 
         if 'text' in msg and 'body' in msg['text']:
             texto = (msg['text']['body'] or '').strip()
@@ -8432,22 +8429,21 @@ def webhook():
             texto = f"[{msg.get('type', 'unknown')}] Mensaje no textual"
 
         app.logger.info(f"📝 Incoming {numero}: '{(texto or '')[:200]}' (imagen={es_imagen}, audio={es_audio}, archivo={es_archivo})")
-        # --- AÑADIR LÓGICA DE NUEVA CONVERSACIÓN AQUÍ ---
+
+        # 9. Registro de Nueva Conversación
         try:
-            # Llama a la función con el número, el texto y la configuración detectada
             registrar_nueva_conversacion(numero, texto, config=config)
         except Exception as e:
-            app.logger.error(f"❌ Error al registrar nueva conversación desde webhook: {e}")
-        # --- FIN LÓGICA AÑADIDA ---
-        # --- GUARDO EL MENSAJE DEL USUARIO INMEDIATAMENTE para que el Kanban y la lista de chats lo reflejen ---
+            app.logger.error(f"❌ Error al registrar nueva conversación: {e}")
+
+        # 10. Guardar mensaje inmediatamente (Persistencia visual para CRM)
         try:
-            # --- MODIFICADO ---
             if es_audio:
                 guardar_mensaje_inmediato(
                     numero, texto, config, 
                     imagen_url=None, es_imagen=False, 
                     tipo_mensaje='audio', contenido_extra=audio_url,
-                    nombre_perfil=nombre_whatsapp  # <--- AGREGAR AQUÍ
+                    nombre_perfil=nombre_whatsapp
                 )
             else:
                 guardar_mensaje_inmediato(
@@ -8456,13 +8452,11 @@ def webhook():
                     tipo_mensaje='imagen' if es_imagen else 'texto', contenido_extra=None,
                     nombre_perfil=nombre_whatsapp
                 )
-            # --- FIN MODIFICADO ---
         except Exception as e:
-            app.logger.warning(f"⚠️ No se pudo guardar mensaje inmediato en webhook: {e}")
-            app.logger.warning(f"⚠️ No se pudo guardar mensaje inmediato en webhook: {e}")
+            app.logger.warning(f"⚠️ Error en guardar_mensaje_inmediato: {e}")
 
-        # Delegate ALL business logic to procesar_mensaje_unificado (single place to persist/respond).
-        # Indicar a la función que el mensaje ya fue guardado (incoming_saved=True)
+        # 11. Delegar a la lógica de negocio y respuesta de IA
+        # incoming_saved=True indica que ya guardamos el mensaje del usuario arriba
         processed_ok = procesar_mensaje_unificado(
             msg=msg,
             numero=numero,
@@ -8477,18 +8471,18 @@ def webhook():
         )
 
         if processed_ok:
-            app.logger.info(f"✅ procesar_mensaje_unificado handled message {message_id} for {numero}")
+            app.logger.info(f"✅ procesar_mensaje_unificado completado para {numero}")
             return 'OK', 200
 
-        # If processing failed, we already saved the incoming message earlier; nothing more to do.
-        app.logger.info(f"⚠️ procesar_mensaje_unificado returned False for {message_id}; message already persisted.")
+        app.logger.info(f"⚠️ procesar_mensaje_unificado devolvió False para {numero}; ya persistido.")
         return 'OK', 200
 
     except Exception as e:
         app.logger.error(f"🔴 CRITICAL error in webhook: {e}")
+        import traceback
         app.logger.error(traceback.format_exc())
         return 'Internal server error', 500
-
+        
 def registrar_respuesta_bot(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False, incoming_saved=False, respuesta_tipo='texto', respuesta_media_url=None, productos_data=None):
     """
     Ahora acepta productos_data para guardar las fichas en la web.
