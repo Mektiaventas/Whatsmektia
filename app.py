@@ -10247,8 +10247,8 @@ EJEMPLOS:
         
 def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
     """
-    Versión FULL RESTAURADA: Mantiene toda la lógica de cascada, 
-    identidad y negocio, corrigiendo solo el formato de salida.
+    Versión FULL OPTIMIZADA: Envía imagen con ficha técnica como caption
+    y evita el doble mensaje genérico cuando hay productos.
     """
     try:
         # --- DeepSeek Product & Visual Intent Detection ---
@@ -10370,7 +10370,7 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
             if img_url and sku_p and sku_p.lower() in texto.lower():
                 if p not in productos_para_ficha: productos_para_ficha.insert(0, p)
 
-        # Relleno de categorías (Lógica original)
+        # Relleno de categorías
         if len(precios) < 30:
             cat_det = detectar_categoria_del_mensaje(texto)
             if cat_det:
@@ -10380,7 +10380,7 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
                     if prod.get('sku') not in skus: precios.append(prod)
     
     else:
-        # CHARLA GENERAL / IDENTIDAD (Lógica original completa)
+        # CHARLA GENERAL / IDENTIDAD
         try:
             data_db = load_config(config)
             if data_db and 'negocio' in data_db:
@@ -10392,52 +10392,68 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
         generar_respuesta_deepseek(numero=numero, texto=texto, precios=[], historial=obtener_historial(numero, limite=6, config=config), config=config, incoming_saved=incoming_saved, es_audio=es_audio)
         return True 
 
-    # --- EJECUCIÓN FINAL Y FORMATO ---
+    # --- EJECUCIÓN FINAL Y FORMATO (CORREGIDO) ---
     
-    # IMPORTANTE: Enviamos el texto ORIGINAL del usuario a la IA para que no "lea" nuestras instrucciones internas
-    generar_respuesta_deepseek(numero=numero, texto=texto, precios=precios, 
-                                historial=obtener_historial(numero, limite=6, config=config),
-                                config=config, incoming_saved=incoming_saved, es_audio=es_audio)
+    # Si NO hay productos para mostrar ficha con imagen, enviamos respuesta de texto normal
+    if not productos_para_ficha:
+        generar_respuesta_deepseek(
+            numero=numero, 
+            texto=texto, 
+            precios=precios, 
+            historial=obtener_historial(numero, limite=6, config=config), 
+            config=config, 
+            incoming_saved=incoming_saved, 
+            es_audio=es_audio
+        )
+        return True
 
-    if productos_para_ficha:
-        for p in productos_para_ficha:
-            img_url = p.get('imagen')
-            sku_p = p.get('sku', '') or 'S/N'
-            titulo_ficha = p.get('sku') or p.get('modelo') or 'Producto'
-            
-            # --- Formateo de Precios ---
-            lineas_p = []
-            mapeo = [('precio_menudeo', 'Menudeo'), ('precio_mayoreo', 'Mayoreo'), ('inscripcion', 'Inscripción'), ('mensualidad', 'Mensualidad'), ('precio', 'Precio')]
-            for llave, etiqueta in mapeo:
-                valor = p.get(llave)
-                try:
-                    if valor and float(valor) > 0: lineas_p.append(f"{etiqueta}: ${valor}")
-                except: continue
+    # Si HAY productos, enviamos la imagen con la ficha como caption
+    # Omitimos generar_respuesta_deepseek aquí para evitar el saludo genérico doble
+    for p in productos_para_ficha:
+        img_url = p.get('imagen')
+        sku_p = p.get('sku', '') or 'S/N'
+        titulo_ficha = p.get('servicio') or p.get('modelo') or 'Producto'
+        
+        # --- Formateo de Precios ---
+        lineas_p = []
+        mapeo = [('precio_menudeo', 'Menudeo'), ('precio_mayoreo', 'Mayoreo'), ('inscripcion', 'Inscripción'), ('mensualidad', 'Mensualidad'), ('precio', 'Precio')]
+        for llave, etiqueta in mapeo:
+            valor = p.get(llave)
+            try:
+                if valor and float(valor) > 0: lineas_p.append(f"💰 *{etiqueta}:* ${valor}")
+            except: continue
 
-            precios_detalle_wa = "\n".join([f"💲 *{l}*" for l in lineas_p]) if lineas_p else "💲 *Precio:* Consultar"
-            precios_detalle_web = "<br>".join([f"💲 <b>{l}</b>" for l in lineas_p]) if lineas_p else "💲 <b>Precio:</b> Consultar"
-            
-            # --- Formateo de Medidas ---
-            med = str(p.get('medidas') or "").strip()
-            med_wa = f"📏 *Medidas:* {med}\n" if med and med not in ['0', '0.00', ''] else ""
-            med_web = f"📏 <b>Medidas:</b> {med}<br>" if med and med not in ['0', '0.00', ''] else ""
+        precios_wa = "\n".join(lineas_p) if lineas_p else "💰 *Precio:* Consultar"
+        
+        # --- Formateo de Medidas ---
+        med = str(p.get('medidas') or "").strip()
+        med_wa = f"📏 *Medidas:* {med}\n" if med and med not in ['0', '0.00', ''] else ""
 
-            # --- Formateo de Descripción ---
-            desc_raw = p.get('descripcion') or ''
-            desc_corta = (desc_raw[:120] + "...") if len(desc_raw) > 120 else desc_raw
+        # --- Formateo de Descripción ---
+        desc_raw = p.get('descripcion') or ''
+        desc_wa = (desc_raw[:150] + "...") if len(desc_raw) > 150 else desc_raw
 
-            # TEXTO FINAL WHATSAPP
-            ficha_wa = f"🔹 *{titulo_ficha}*\n{precios_detalle_wa}\n{med_wa}📝 {desc_corta}\n🆔 *SKU:* {sku_p}"
-            
-            # TEXTO FINAL WEB (HTML)
-            ficha_web = f"<b>{titulo_ficha}</b><br>{precios_detalle_web}<br>{med_web}📝 {desc_corta}<br>🆔 <b>SKU:</b> {sku_p}"
+        # TEXTO FINAL WHATSAPP (CAPTION)
+        ficha_caption = (
+            f"🔹 *{titulo_ficha.upper()}*\n\n"
+            f"{precios_wa}\n"
+            f"{med_wa}"
+            f"📝 {desc_wa}\n\n"
+            f"🆔 *SKU:* {sku_p}\n\n"
+            "¿Te gustaría más información o agendar una visita?"
+        )
+        
+        # TEXTO FINAL WEB (HTML)
+        ficha_web = f"<b>{titulo_ficha}</b><br>{precios_wa.replace('💰 *', '💰 <b>').replace('*:', ':</b>')}<br>{med_wa.replace('📏 *', '📏 <b>').replace('*:', ':</b>')}📝 {desc_wa}<br>🆔 <b>SKU:</b> {sku_p}"
 
-            if img_url and img_url.strip():
-                try:
-                    enviar_imagen(numero, img_url, texto=ficha_wa, config=config)
-                    actualizar_respuesta(numero, texto, ficha_web, config, respuesta_tipo='imagen', respuesta_media_url=img_url)
-                    time.sleep(1.2)
-                except Exception as e: app.logger.error(f"❌ Error ficha: {e}")
+        if img_url and img_url.strip():
+            try:
+                # Forzamos el envío de imagen con parámetros nombrados para asegurar consistencia
+                enviar_imagen(numero=numero, image_url=img_url, texto=ficha_caption, config=config)
+                actualizar_respuesta(numero=numero, mensaje=texto, respuesta=ficha_web, config=config, respuesta_tipo='imagen', respuesta_media_url=img_url)
+                time.sleep(1.5)
+            except Exception as e: 
+                app.logger.error(f"❌ Error enviando ficha de {sku_p}: {e}")
 
     return True
         
