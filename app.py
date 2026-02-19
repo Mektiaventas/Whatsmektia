@@ -10045,34 +10045,23 @@ EJEMPLOS:
                 
         if intent == "ENVIAR_IMAGEN" and image_field:
             try:
-                # Cámbiala por esta (especificando los nombres de los parámetros):
+                # CORRECCIÓN: Pasamos los parámetros con nombre para evitar el error de posición
+                # Esto asegura que config sea config y respuesta_text sea el caption
                 sent = enviar_imagen(numero, image_field, texto=respuesta_text, config=config)
-                app.logger.info(f"DEBUG IA -> Intent: '{intent}', Image Field: '{image_field}'")
-                if respuesta_text:
-                    if numero.startswith('tg_'):
-                        telegram_token = config.get('telegram_token')
-                        if telegram_token:
-                            chat_id = numero.replace('tg_', '')
-                            send_telegram_message(chat_id, respuesta_text, telegram_token) 
-                        else:
-                            app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
-                    else:
-                        enviar_mensaje(numero, respuesta_text, config) 
+                
+                app.logger.info(f"DEBUG IA -> Intent: '{intent}', Image Field: '{image_field}', Sent: {sent}")
+                
+                # Si la imagen se envió con éxito, ya lleva el texto (caption). 
+                # NO llames a enviar_mensaje de nuevo para no duplicar.
                 
                 bot_media_url_to_save = image_field
-                # CAMBIO AQUÍ: Usamos la función que realmente impacta la DB con los tipos correctos
                 actualizar_respuesta(
                     numero=numero, 
                     mensaje=texto, 
                     respuesta=respuesta_text, 
                     config=config,
-                    respuesta_tipo='imagen',           # <--- Para que el JS sepa que es imagen
-                    respuesta_media_url=bot_media_url_to_save # <--- La URL de la silla
-                # registrar_respuesta_bot(
-                #    numero, texto, respuesta_text, config,
-                #    incoming_saved=incoming_saved,
-                #    respuesta_tipo='imagen',
-                #    respuesta_media_url=bot_media_url_to_save
+                    respuesta_tipo='imagen',
+                    respuesta_media_url=bot_media_url_to_save
                 )
                 return True
             except Exception as e:
