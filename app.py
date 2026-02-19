@@ -10045,15 +10045,20 @@ EJEMPLOS:
                 
         if intent == "ENVIAR_IMAGEN" and image_field:
             try:
-                # CORRECCIÓN: Pasamos los parámetros con nombre para evitar el error de posición
-                # Esto asegura que config sea config y respuesta_text sea el caption
-                sent = enviar_imagen(numero, image_field, texto=respuesta_text, config=config)
+                # Forzamos los nombres de los parámetros para que no haya errores de posición
+                # Esto garantiza que 'config' use el dominio de Unilova y no el default 'app'
+                sent = enviar_imagen(
+                    numero=numero, 
+                    image_url=image_field, 
+                    texto=respuesta_text, 
+                    config=config
+                )
                 
-                app.logger.info(f"DEBUG IA -> Intent: '{intent}', Image Field: '{image_field}', Sent: {sent}")
+                app.logger.info(f"✅ Intento envío imagen: {image_field} | Resultado: {sent}")
                 
-                # Si la imagen se envió con éxito, ya lleva el texto (caption). 
-                # NO llames a enviar_mensaje de nuevo para no duplicar.
-                
+                # IMPORTANTE: Aquí NO debe haber un enviar_mensaje(numero, respuesta_text...) 
+                # porque el texto ya va dentro de la imagen como 'caption'.
+
                 bot_media_url_to_save = image_field
                 actualizar_respuesta(
                     numero=numero, 
@@ -10065,7 +10070,7 @@ EJEMPLOS:
                 )
                 return True
             except Exception as e:
-                app.logger.error(f"🔴 Error enviando imagen: {e}")
+                app.logger.error(f"🔴 Error crítico en bloque ENVIAR_IMAGEN: {e}")
         if intent == "ENVIAR_DOCUMENTO" and document_field:
             try:
                 if numero.startswith('tg_'):
