@@ -10923,22 +10923,21 @@ def obtener_configuracion_por_host():
         raw_host = request.host.lower().split(':')[0]
         subdominio = raw_host.split('.')[0]
         
-        # Lógica de default que ya tenías
+        # Filtro de dominios principales
         if subdominio in ['www', 'smartwhats', 'mektia'] or '.' not in request.host:
             subdominio = 'mektia'
 
-        # 1. Obtenemos datos técnicos de la base 'clientes'
+        # 1. Obtenemos datos técnicos (Tokens/IDs) de la base maestra 'clientes'
         config = get_cliente_by_subdomain(subdominio)
         
         if config:
-            # 2. SEGUNDO SALTO: Traer la personalidad de la IA de la base del tenant
+            # 2. SEGUNDO SALTO: Intentar traer la personalidad (IA/Negocio)
             tenant_db = config.get('db_name')
             try:
-                # Usamos tu pool de conexiones para entrar a la BD del cliente
                 conn = get_db_connection({'db_name': tenant_db})
                 cur = conn.cursor(dictionary=True)
                 
-                # Traemos TODO de la tabla configuracion (ia_nombre, que_hace, eslogan, etc.)
+                # Buscamos la fila de configuración del tenant
                 cur.execute("SELECT * FROM configuracion LIMIT 1")
                 datos_ia = cur.fetchone()
                 
@@ -10946,24 +10945,25 @@ def obtener_configuracion_por_host():
                 conn.close()
                 
                 if datos_ia:
-                    # Fusionamos: ahora config tendrá tokens + personalidad
+                    # Inyectamos el nombre de la IA y el 'que_hace' en el objeto config
                     config.update(datos_ia)
-                    # Agregamos el subdominio para el socket CRM
+                    # Guardamos el subdominio para el socket del CRM
                     config['subdominio_actual'] = subdominio 
                     
             except Exception as ex:
-                logger.error(f"⚠️ No se pudo leer la tabla 'configuracion' en {tenant_db}: {ex}")
+                # Si falla el salto al tenant, al menos tenemos los tokens para que el sistema no muera
+                logger.error(f"⚠️ Error al leer tabla 'configuracion' en {tenant_db}: {ex}")
             
             return config
 
-        # Default en caso de que no exista el cliente
+        # Fallback si el cliente no existe en la tabla maestra
         return {
             'db_name': 'mektia',
             'db_host': 'localhost',
             'dominio': 'mektia.com'
         }
     except Exception as e:
-        logger.error(f"🔴 Error en obtener_configuracion_por_host: {e}")
+        logger.error(f"🔴 Error crítico en obtener_configuracion_por_host: {e}")
         return {'db_name': 'mektia', 'db_host': 'localhost'}
     
 @app.route('/diagnostico')
