@@ -9729,14 +9729,10 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         # ================================================================
         # INICIO DEL BLOQUE - IA TOTAL CON FORMATO "FICHA DE PRODUCTO"
         # ================================================================
-        # Llamamos a la nueva función que contiene toda la lógica anterior
-        # En lugar de retornar, guardamos el resultado para seguir procesando abajo
-        resultado_fichas = fichas_ia_total(numero, texto, es_audio, config, incoming_saved)
-        # Si la función ya envió el mensaje o falló, salimos. 
-        # Pero si el bloque de abajo es el que debe enviar la imagen, 
-        # asegúrate de que fichas_ia_total NO esté haciendo el return True prematuro.
-        if resultado_fichas:
-             return True
+        # Llamamos a la función de fichas. 
+        # Esta función internamente decidirá si manda texto simple o ficha con imagen.
+        if fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
+            return True
         # ================================================================
         # FIN DEL BLOQUE - IA TOTAL
         # ================================================================
