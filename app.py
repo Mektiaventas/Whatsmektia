@@ -10330,13 +10330,11 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
             for p in precios:
                 texto_ficha = f"*{p.get('modelo', 'Producto')}*\n\n{p.get('descripcion', '')}\n\n💰 *Precio:* ${p.get('precio')}"
                 
-                # VALIDACIÓN DE IMAGEN
-                img_url = p.get('imagen_url')
-                if img_url and str(img_url).strip():
-                    enviar_imagen(numero, img_url, texto=texto_ficha, config=config)
-                else:
-                    # Si no hay imagen, enviamos solo el texto para no perder la venta
-                    enviar_whatsapp(numero, texto_ficha, config=config)
+                # Si no hay imagen, mandamos un espacio para que no sea None y no truene el .strip()
+                img_url = p.get('imagen_url') if p.get('imagen_url') else " "
+                
+                # Usamos la única función que el log confirmó que existe
+                enviar_imagen(numero, img_url, texto=texto_ficha, config=config)
             
             return "OK"
         # -------------------------------
