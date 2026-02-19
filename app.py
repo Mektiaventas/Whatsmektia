@@ -10913,21 +10913,20 @@ def obtener_configuracion_por_host():
         raw_host = request.host.lower().split(':')[0]
         subdominio = raw_host.split('.')[0]
         
-        # Filtro de dominios principales
         if subdominio in ['www', 'smartwhats', 'mektia'] or '.' not in request.host:
             subdominio = 'mektia'
 
-        # 1. Obtenemos datos técnicos (Tokens/IDs) de la base maestra 'clientes'
+        app.logger.info(f"🔍 DEBUG: Buscando en base maestra el subdominio: {subdominio}")
         config = get_cliente_by_subdomain(subdominio)
         
         if config:
-            # 2. SEGUNDO SALTO: Intentar traer la personalidad (IA/Negocio)
             tenant_db = config.get('db_name')
+            app.logger.info(f"🔍 DEBUG: Cliente encontrado. BD Tenant: {tenant_db}")
+            
             try:
                 conn = get_db_connection({'db_name': tenant_db})
                 cur = conn.cursor(dictionary=True)
                 
-                # Buscamos la fila de configuración del tenant
                 cur.execute("SELECT * FROM configuracion LIMIT 1")
                 datos_ia = cur.fetchone()
                 
@@ -10935,27 +10934,22 @@ def obtener_configuracion_por_host():
                 conn.close()
                 
                 if datos_ia:
-                    # Inyectamos el nombre de la IA y el 'que_hace' en el objeto config
+                    app.logger.info(f"🔍 DEBUG: ¡Personalidad encontrada! Nombre IA: {datos_ia.get('ia_nombre')}")
                     config.update(datos_ia)
-                    # Guardamos el subdominio para el socket del CRM
-                    config['subdominio_actual'] = subdominio 
+                else:
+                    app.logger.warning(f"🔍 DEBUG: La tabla 'configuracion' en {tenant_db} está VACÍA.")
                     
             except Exception as ex:
-                # Si falla el salto al tenant, al menos tenemos los tokens para que el sistema no muera
-                logger.error(f"⚠️ Error al leer tabla 'configuracion' en {tenant_db}: {ex}")
+                app.logger.error(f"❌ DEBUG: Error conectando a la base {tenant_db}: {ex}")
             
             return config
 
-        # Fallback si el cliente no existe en la tabla maestra
-        return {
-            'db_name': 'mektia',
-            'db_host': 'localhost',
-            'dominio': 'mektia.com'
-        }
-    except Exception as e:
-        logger.error(f"🔴 Error crítico en obtener_configuracion_por_host: {e}")
+        app.logger.error(f"❌ DEBUG: No se encontró el subdominio {subdominio} en la base maestra.")
         return {'db_name': 'mektia', 'db_host': 'localhost'}
-    
+    except Exception as e:
+        app.logger.error(f"🔴 Error crítico en obtener_configuracion_por_host: {e}")
+        return {'db_name': 'mektia', 'db_host': 'localhost'}
+        
 @app.route('/diagnostico')
 def diagnostico():
     """Endpoint de diagnóstico corregido sin 'Unread result found'"""
