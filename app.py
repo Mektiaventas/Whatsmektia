@@ -10910,54 +10910,54 @@ def obtener_configuracion_por_host():
     try:
         from services import get_db_connection, get_cliente_by_subdomain
         
-        raw_host = request.host.lower().split(':')[0]
-        partes = raw_host.split('.')
+        # 1. Extraer el subdominio puramente de la URL
+        # Ejemplo: 'unilova.mektia.com' -> 'unilova'
+        # Ejemplo: 'smartwhats.mektia.com' -> 'smartwhats'
+        host_parts = request.host.lower().split('.')
         
-        # Si tiene subdominio (ej: unilova.mektia.com), tomamos el primero
-        # Si no tiene (ej: localhost o mektia.com), usamos un default
-        if len(partes) > 1 and partes[0] not in ['www']:
-            subdominio = partes[0]
+        if len(host_parts) >= 2:
+            subdominio = host_parts[0]
         else:
-            subdominio = 'smartwhats' # El default solo si no hay subdominio claro
+            # Si entran por IP o dominio sin punto, no podemos adivinar el cliente
+            app.logger.warning(f"⚠️ Host inválido o sin subdominio: {request.host}")
+            return None 
 
-        app.logger.info(f"🔍 DEBUG: Buscando en base maestra el subdominio: {subdominio}")
+        app.logger.info(f"🔍 Host Detective: Buscando cliente para '{subdominio}'")
+        
+        # 2. La Base Maestra es la única que manda
         config = get_cliente_by_subdomain(subdominio)
         
-        if config:
-            # --- TRADUCCIÓN DE NOMBRES (De Base Maestra a Código) ---
-            # Esto hace que config['phone_number_id'] tenga el valor de wa_phone_id de la BD
-            config['phone_number_id'] = config.get('wa_phone_id')
-            config['whatsapp_token'] = config.get('wa_token')
-            
-            tenant_db = config.get('db_name')
-            app.logger.info(f"🔍 DEBUG: Cliente encontrado. BD Tenant: {tenant_db}")
-            
-            try:
-                conn = get_db_connection({'db_name': tenant_db})
-                cur = conn.cursor(dictionary=True)
-                
-                # Intentamos sacar el resto de la configuración de la tabla local
-                cur.execute("SELECT * FROM configuracion LIMIT 1")
-                datos_ia = cur.fetchone()
-                
-                cur.close()
-                conn.close()
-                
-                if datos_ia:
-                    app.logger.info(f"🔍 DEBUG: ¡Personalidad encontrada! Nombre IA: {datos_ia.get('ia_nombre')}")
-                    # Combinamos todo. Si algo falta en la maestra, lo podría completar datos_ia
-                    config.update(datos_ia)
-                
-            except Exception as ex:
-                app.logger.error(f"❌ DEBUG: Error conectando a la base {tenant_db}: {ex}")
-            
-            return config
+        if not config:
+            app.logger.error(f"❌ El cliente '{subdominio}' no existe en la Base Maestra.")
+            return None
 
-        app.logger.error(f"❌ DEBUG: No se encontró el subdominio {subdominio} en la base maestra.")
-        return {'db_name': 'mektia', 'db_host': 'localhost'}
+        # 3. Mapeo dinámico de credenciales
+        config['phone_number_id'] = config.get('wa_phone_id')
+        config['whatsapp_token'] = config.get('wa_token')
+        
+        # 4. Conexión a su base de datos (usando el nombre de dominio como nombre de BD)
+        tenant_db = subdominio 
+        
+        try:
+            conn = get_db_connection({'db_name': tenant_db})
+            cur = conn.cursor(dictionary=True)
+            cur.execute("SELECT * FROM configuracion LIMIT 1")
+            datos_ia = cur.fetchone()
+            cur.close()
+            conn.close()
+            
+            if datos_ia:
+                config.update(datos_ia)
+                app.logger.info(f"✅ Conectado a BD '{tenant_db}'. IA: {datos_ia.get('ia_nombre')}")
+                
+        except Exception as ex:
+            app.logger.error(f"❌ Error al conectar a la BD del cliente '{tenant_db}': {ex}")
+            
+        return config
+
     except Exception as e:
-        app.logger.error(f"🔴 Error crítico en obtener_configuracion_por_host: {e}")
-        return {'db_name': 'mektia', 'db_host': 'localhost'}
+        app.logger.error(f"🔴 Error crítico en Host Detective: {e}")
+        return None
         
 @app.route('/diagnostico')
 def diagnostico():
