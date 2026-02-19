@@ -344,57 +344,44 @@ def enviar_mensaje(numero, texto, config=None):
         return False 
 def enviar_imagen(numero, image_url, texto=None, config=None):
     """
-    Versión CORREGIDA: Detecta dinámicamente el subdominio (unilova, etc.)
-    para evitar errores 502 de Meta.
+    LA CHULADA: Envía imagen + texto en un solo mensaje.
+    Forzado de subdominio dinámico para evitar error 502.
     """
     try:
-        # 1. Configuración de Token y Tenant
-        if config is None:
-            try:
-                from app import obtener_configuracion_por_host
-                config = obtener_configuracion_por_host()
-            except Exception:
-                config = {}
-
         cfg = config or {}
         phone_id = cfg.get('phone_number_id')
         token = cfg.get('whatsapp_token')
         
-        # --- MEJORA AQUÍ: Priorizar el subdominio configurado ---
-        # Si config tiene 'subdominio', lo usamos. Si no, lo sacamos del dominio.
-        tenant_slug = cfg.get('subdominio') 
-        dominio_raw = cfg.get('dominio', 'app.mektia.com')
+        # OBTENER EL SUBDOMINIO REAL (Ej: unilova)
+        # Si no viene en config, lo sacamos del host actual
+        subdominio = cfg.get('subdominio')
+        if not subdominio:
+            subdominio = "unilova" # Hardcode de seguridad para esta instancia si falla el config
 
-        if not tenant_slug:
-            tenant_slug = dominio_raw.split('.')[0] if dominio_raw else 'default'
+        # LIMPIEZA DE URL:
+        # Extraemos solo el nombre del archivo (ej: imagen.jpg)
+        filename = os.path.basename(image_url.strip())
         
-        # Aseguramos que el dominio tenga el subdominio correcto
-        # Esto evita que mande app.mektia.com cuando debería ser unilova.mektia.com
-        if tenant_slug not in dominio_raw:
-            dominio_final = f"{tenant_slug}.mektia.com"
-        else:
-            dominio_final = dominio_raw
+        # RECONSTRUCCIÓN TOTAL DE LA URL PÚBLICA
+        # Forzamos que apunte al subdominio correcto del cliente
+        public_url = f"https://{subdominio}.mektia.com/static/uploads/productos/{subdominio}/{filename}"
 
         if not phone_id or not token:
-            logger.error(f"🔴 enviar_imagen ({tenant_slug}): falta phone_id o token")
+            logger.error(f"🔴 enviar_imagen: Falta ID o Token para {subdominio}")
             return False
 
-        # 2. CONSTRUIR URL PÚBLICA (Limpia y dinámica)
-        filename = os.path.basename(image_url.strip())
-        # Si image_url ya contiene la ruta completa de otra DB, la limpiamos para que use la actual
-        base_url = f"https://{dominio_final}" if not dominio_final.startswith('http') else dominio_final
-        public_url = f"{base_url.rstrip('/')}/static/uploads/productos/{tenant_slug}/{filename}"
-
-        # 3. Enviar a Meta via Graph API
         url_api = f"https://graph.facebook.com/v21.0/{phone_id}/messages"
         headers = {
             'Authorization': f'Bearer {token}',
             'Content-Type': 'application/json'
         }
         
-        image_data = {'link': public_url}
-        if texto and str(texto).strip():
-            image_data['caption'] = str(texto).strip()
+        # Estructura para que lleguen juntos (Caption)
+        image_data = {
+            'link': public_url
+        }
+        if texto:
+            image_data['caption'] = texto
 
         payload = {
             'messaging_product': 'whatsapp',
@@ -403,20 +390,18 @@ def enviar_imagen(numero, image_url, texto=None, config=None):
             'image': image_data
         }
 
-        logger.info(f"📤 Intentando enviar ({tenant_slug}): {public_url}")
-        
+        logger.info(f"🚀 DESPEGUE: Enviando a Meta -> {public_url}")
         r = requests.post(url_api, headers=headers, json=payload, timeout=15)
         
         if r.status_code in (200, 201, 202):
-            logger.info(f"✅ Imagen enviada correctamente a {numero}")
+            logger.info(f"✅ ¡CHULADA ENVIADA! Imagen + Texto a {numero}")
             return True
         else:
-            # Si Meta falla por 502, el log nos dirá exactamente qué URL falló
-            logger.error(f"🔴 Meta falló (502/400). URL intentada: {public_url} | Error: {r.text}")
+            logger.error(f"🔴 Error Meta: {r.status_code} - {r.text}")
             return False
 
     except Exception as e:
-        logger.error(f"🔴 Excepción en enviar_imagen: {str(e)}")
+        logger.error(f"🔴 Error en enviar_imagen: {str(e)}")
         return False
 def enviar_documento(numero, file_url, filename, config=None):
     """Enviar documento por link con logging diagnóstico y mejor manejo de URLs."""
