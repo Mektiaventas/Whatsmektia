@@ -10911,10 +10911,14 @@ def obtener_configuracion_por_host():
         from services import get_db_connection, get_cliente_by_subdomain
         
         raw_host = request.host.lower().split(':')[0]
-        subdominio = raw_host.split('.')[0]
+        partes = raw_host.split('.')
         
-        if subdominio in ['www', 'smartwhats', 'mektia'] or '.' not in request.host:
-            subdominio = 'mektia'
+        # Si tiene subdominio (ej: unilova.mektia.com), tomamos el primero
+        # Si no tiene (ej: localhost o mektia.com), usamos un default
+        if len(partes) > 1 and partes[0] not in ['www']:
+            subdominio = partes[0]
+        else:
+            subdominio = 'smartwhats' # El default solo si no hay subdominio claro
 
         app.logger.info(f"🔍 DEBUG: Buscando en base maestra el subdominio: {subdominio}")
         config = get_cliente_by_subdomain(subdominio)
