@@ -9504,47 +9504,60 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
         except Exception as e:
             print(f"⚠️ Error al sincronizar identidad desde DB: {e}")
 
-        ia_nombre = config.get('ia_nombre') or "Asistente"
-        negocio_nombre = config.get('negocio_nombre') or "Negocio"
+        ia_nombre = config.get('ia_nombre') or "LOVA"
+        negocio_nombre = config.get('negocio_nombre') or "Tec. UNILOVA"
         que_hace = config.get('que_hace') or "Asistir a los clientes."
-        # Intentamos obtener el subdominio de 3 formas para que NUNCA sea "NO DEFINIDO"
         subdominio = config.get('subdominio_actual') or config.get('dominio', 'mektia').split('.')[0]
 
-        # 3. CONTEXTO DE NEGOCIO (Forzamos la data aquí)
+        # 3. CONTEXTO DE NEGOCIO Y PRODUCTOS
         detalles_negocio = f"""
-        DATOS DEL NEGOCIO:
-        - Nombre: {negocio_nombre}
-        - Tu nombre (IA): {ia_nombre}
-        - Qué hacemos: {que_hace}
+        ERES: {ia_nombre}, el asistente virtual de {negocio_nombre}.
+        TU OBJETIVO Y REGLAS (QUE_HACE):
+        {que_hace}
         """
 
         contexto_productos = ""
+        hay_productos = False
         if catalog_list and len(catalog_list) > 0:
-            contexto_productos = "\nLISTA DE PRECIOS REALES:\n"
+            hay_productos = True
+            contexto_productos = "\nCATÁLOGO DE PRECIOS ENCONTRADO:\n"
             for p in catalog_list:
                 contexto_productos += f"- {p.get('nombre')}: ${p.get('precio_menudeo')}\n"
         else:
-            contexto_productos = "\n(No hay lista de precios técnica, usa la descripción general del negocio).\n"
+            contexto_productos = "\n(No se encontraron productos específicos en la búsqueda de base de datos, usa la información de 'QUE_HACE').\n"
 
-        # 4. EL SYSTEM PROMPT NO NEGOCIABLE
+        # 4. EL SYSTEM PROMPT (Aquí definimos la personalidad)
         system_prompt = f"""
         {detalles_negocio}
         
         {contexto_productos}
 
-        INSTRUCCIONES DE PERSONALIDAD:
-        1. Eres {ia_nombre}. Cada vez que hables, debes sonar como el asistente de {negocio_nombre}.
-        2. Si el usuario pide precios y no hay una lista arriba, explica qué servicios ofrece {negocio_nombre} basado en 'Qué hacemos'.
-        3. NUNCA uses frases como "En Negocio, ofrecemos...". Usa "{negocio_nombre}".
-        4. No respondas con "Claro, aquí tienes la información" si no vas a dar información específica.
+        INSTRUCCIONES CRÍTICAS:
+        1. Tu nombre es {ia_nombre}. Nunca lo olvides.
+        2. Tu eslogan es "THE WAY OF THE FUTURE".
+        3. Usa el tono: {config.get('tono', 'animado y directo')}.
+        4. Si el cliente pide información, usa la lista de cursos mencionada en 'QUE_HACE'.
+        5. IMPORTANTE: Responde ÚNICAMENTE en formato JSON.
 
-        RESPONDE SIEMPRE EN ESTE JSON:
+        JSON ESPERADO:
         {{
-          "intent": "INFORMACION",
-          "respuesta_text": "Escribe aquí tu respuesta con personalidad...",
+          "intent": "INFORMACION" o "PASAR_ASESOR",
+          "respuesta_text": "Tu mensaje aquí...",
           "notify_asesor": false
         }}
         """
+
+        # --- AQUÍ ESTABA EL ERROR: Construimos la lista de mensajes ---
+        lista_mensajes = [{"role": "system", "content": system_prompt}]
+        
+        # Añadimos historial para que tenga memoria (últimos 6 mensajes)
+        if historial:
+            for h in historial[-6:]:
+                role = "assistant" if h.get('enviado_por') == 'ia' else "user"
+                lista_mensajes.append({"role": role, "content": h.get('mensaje', '')})
+        
+        # Añadimos el mensaje actual del usuario
+        lista_mensajes.append({"role": "user", "content": texto})
 
         # 5. LLAMADA A LA API
         api_key = os.getenv('DEEPSEEK_API_KEY')
@@ -9553,107 +9566,55 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
             "model": "deepseek-chat", 
             "messages": lista_mensajes, 
             "response_format": {"type": "json_object"},
-            "temperature": 0.2
+            "temperature": 0.3
         }
         
-        # Valores por defecto para evitar que el código truene si la API falla
-        mensaje_para_cliente = "Lo siento, tuve un problema técnico. ¿Puedes repetir?"
+        mensaje_para_cliente = "¡Hola! Soy LOVA de Tec. UNILOVA. ¿En qué puedo ayudarte hoy?"
         intent = "INFORMACION"
         notify_asesor = False
 
         try:
             resp = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload, timeout=15)
             resp.raise_for_status()
-            
             res_raw = resp.json()['choices'][0]['message']['content']
-            res_raw = res_raw.replace('\\n', '<br>')
-            
             decision = json.loads(res_raw)
             
-            mensaje_para_cliente = decision.get('respuesta_text') or "Claro, dime en qué te ayudo."
+            mensaje_para_cliente = decision.get('respuesta_text') or mensaje_para_cliente
             intent = (decision.get('intent') or "INFORMACION").upper()
             notify_asesor = bool(decision.get('notify_asesor'))
         except Exception as e:
-            print(f"❌ Error llamando a DeepSeek: {e}")
+            app.logger.error(f"❌ Error llamando a DeepSeek: {e}")
 
-        # 6. FILTRO DE PREVALENCIA (Ya no tronará porque intent y notify_asesor existen arriba)
-        palabras_humano = ["asesor", "humano", "persona", "hablar con alguien"]
+        # 6. FILTRO DE PREVALENCIA
+        palabras_humano = ["asesor", "humano", "persona", "hablar con alguien", "inscripción", "inscribirme"]
         usuario_quiere_humano = any(w in texto.lower() for w in palabras_humano)
 
-        if hay_productos and not usuario_quiere_humano:
-            if intent == "PASAR_ASESOR" or notify_asesor is True:
-                intent = "INFORMACION"
-                notify_asesor = False
-                
-        # 7. LÓGICA DE AUDIO (TTS)
-        audio_url_publica = None
-        if es_audio and mensaje_para_cliente:
-            try:
-                from whatsapp import texto_a_voz
-                tono = config.get('tono_voz', 'nova')
-                filename = f"resp_{numero}_{int(time.time())}"
-                audio_url_publica = texto_a_voz(mensaje_para_cliente, filename, config, voz=tono)
-                if audio_url_publica:
-                    filename_only = os.path.basename(urlparse(audio_url_publica).path)
-                    audio_url_publica = f"{request.url_root.rstrip('/')}/proxy-audio/{filename_only}"
-            except Exception as e:
-                print(f"🔴 Error TTS: {e}")
-
-        # 8. EJECUTAR ACCIÓN DE ASESOR (Solo si pasó los filtros)
-        if intent == "PASAR_ASESOR" or notify_asesor is True:
+        if intent == "PASAR_ASESOR" or notify_asesor or usuario_quiere_humano:
+            # Si el usuario quiere inscribirse o pasar a asesor, ejecutamos la transferencia
             try:
                 from whatsapp import enviar_mensaje 
-                app.logger.info(f"🚀 [ASESOR] Iniciando transferencia para {numero}")
                 func_asesor = globals().get('pasar_contacto_asesor')
                 if func_asesor:
                     func_asesor(numero, config=config, notificar_asesor=True)
-                    msg_cliente = mensaje_para_cliente if (len(mensaje_para_cliente) > 5) else "Un asesor humano te atenderá en breve."
-                    enviar_mensaje(numero, msg_cliente, config)
-                    
-                    func_registrar = globals().get('registrar_respuesta_bot')
-                    if func_registrar:
-                        func_registrar(numero, texto, msg_cliente, config, incoming_saved=incoming_saved)
-                    
-                    return True # AQUÍ SÍ CORTA EL FLUJO
+                    msg_final = mensaje_para_cliente if len(mensaje_para_cliente) > 10 else "Te estoy transfiriendo con Gabriel Casillas, tu asesor experto."
+                    enviar_mensaje(numero, msg_final, config)
+                    return True
             except Exception as e:
                 app.logger.error(f"🔴 Error al pasar a asesor: {e}")
 
         # 9. ENVÍO FINAL (SI NO HUBO ASESOR)
         from whatsapp import enviar_mensaje, enviar_mensaje_voz
         
-        if audio_url_publica:
-            enviar_mensaje(numero, f"*(Audio)* {mensaje_para_cliente}", config)
-            enviar_mensaje_voz(numero, audio_url_publica, config)
-        else:
-            enviar_mensaje(numero, mensaje_para_cliente, config)
+        audio_url_publica = None # Inicializamos
+        # (Aquí puedes reinsertar tu lógica de TTS si la usas)
 
-        # Socket para el CRM
-        try:
-            from app import socketio
-            socketio.emit('nuevo_mensaje_crm', {
-                'wa_id': numero,
-                'texto': mensaje_para_cliente,
-                'type': 'ficha' if hay_productos else 'texto',
-                'productos': catalog_list,
-                'subdominio': subdominio,
-                'is_ia': True
-            }, room=numero)
-        except: pass
+        enviar_mensaje(numero, mensaje_para_cliente, config)
 
         # 10. REGISTRO EN DB
         try:
             func_registrar = globals().get('registrar_respuesta_bot')
             if func_registrar:
-                tipo_res = 'ficha' if hay_productos else 'texto'
-                if audio_url_publica: tipo_res = 'audio'
-                
-                func_registrar(
-                    numero, texto, mensaje_para_cliente, config, 
-                    incoming_saved=incoming_saved,
-                    respuesta_tipo=tipo_res,
-                    respuesta_media_url=audio_url_publica,
-                    productos_data=catalog_list
-                )
+                func_registrar(numero, texto, mensaje_para_cliente, config, incoming_saved=incoming_saved)
         except: pass
 
         return True
