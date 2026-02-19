@@ -10045,7 +10045,8 @@ EJEMPLOS:
                 
         if intent == "ENVIAR_IMAGEN" and image_field:
             try:
-                sent = enviar_imagen(numero, image_field, config)
+                # Cámbiala por esta (especificando los nombres de los parámetros):
+                sent = enviar_imagen(numero, image_field, texto=respuesta_text, config=config)
                 app.logger.info(f"DEBUG IA -> Intent: '{intent}', Image Field: '{image_field}'")
                 if respuesta_text:
                     if numero.startswith('tg_'):
