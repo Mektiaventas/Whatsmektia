@@ -10913,27 +10913,17 @@ def obtener_configuracion_por_host():
         raw_host = request.host.lower().split(':')[0]
         subdominio = raw_host.split('.')[0]
         
-        # 1. Definir los subdominios que sabemos que deben usar la BD 'mektia'
-        # Eliminamos 'smartwhats' de aquí si es que ese es el subdominio oficial en la tabla clientes
-        nombres_base = ['www', 'mektia'] 
-        
-        target_search = 'mektia' if (subdominio in nombres_base or '.' not in request.host) else subdominio
+        if subdominio in ['www', 'smartwhats', 'mektia'] or '.' not in request.host:
+            subdominio = 'mektia'
 
-        app.logger.info(f"🔍 DEBUG: Buscando en base maestra el subdominio: {target_search}")
-        config = get_cliente_by_subdomain(target_search)
+        app.logger.info(f"🔍 DEBUG: Buscando en base maestra el subdominio: {subdominio}")
+        config = get_cliente_by_subdomain(subdominio)
         
-        # 2. Si no se encontró con el subdominio específico (ej. smartwhats), 
-        # intentar con el default 'mektia'
-        if not config and target_search != 'mektia':
-            app.logger.info(f"🔍 DEBUG: No se encontró {target_search}, intentando con fallback 'mektia'")
-            config = get_cliente_by_subdomain('mektia')
-
         if config:
             tenant_db = config.get('db_name')
             app.logger.info(f"🔍 DEBUG: Cliente encontrado. BD Tenant: {tenant_db}")
             
             try:
-                # Usar un contexto para cerrar la conexión automáticamente (más seguro)
                 conn = get_db_connection({'db_name': tenant_db})
                 cur = conn.cursor(dictionary=True)
                 
@@ -10954,9 +10944,8 @@ def obtener_configuracion_por_host():
             
             return config
 
-        app.logger.error(f"❌ DEBUG: No se encontró configuración ni para {target_search} ni para mektia.")
+        app.logger.error(f"❌ DEBUG: No se encontró el subdominio {subdominio} en la base maestra.")
         return {'db_name': 'mektia', 'db_host': 'localhost'}
-
     except Exception as e:
         app.logger.error(f"🔴 Error crítico en obtener_configuracion_por_host: {e}")
         return {'db_name': 'mektia', 'db_host': 'localhost'}
