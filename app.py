@@ -10336,7 +10336,7 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
                     enviar_imagen(numero, img_url, texto=texto_ficha, config=config)
                 else:
                     # Si no hay imagen, enviamos solo el texto para no perder la venta
-                    enviar_mensaje_texto(numero, texto_ficha, config=config)
+                    enviar_whatsapp(numero, texto_ficha, config=config)
             
             return "OK"
         # -------------------------------
