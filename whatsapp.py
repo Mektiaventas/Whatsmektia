@@ -344,30 +344,26 @@ def enviar_mensaje(numero, texto, config=None):
         return False 
 def enviar_imagen(numero, image_url, texto=None, config=None):
     """
-    LA CHULADA: Envía imagen + texto en un solo mensaje.
-    Forzado de subdominio dinámico para evitar error 502.
+    LA CHULADA CONFIRMADA: Envía imagen + texto (caption) en un solo globo.
+    Usa la ruta directa confirmada: https://dominio/uploads/productos/archivo.ext
     """
     try:
         cfg = config or {}
         phone_id = cfg.get('phone_number_id')
         token = cfg.get('whatsapp_token')
         
-        # OBTENER EL SUBDOMINIO REAL (Ej: unilova)
-        # Si no viene en config, lo sacamos del host actual
-        subdominio = cfg.get('subdominio')
-        if not subdominio:
-            subdominio = "unilova" # Hardcode de seguridad para esta instancia si falla el config
-
-        # LIMPIEZA DE URL:
-        # Extraemos solo el nombre del archivo (ej: imagen.jpg)
+        # Obtenemos el dominio (unilova.mektia.com)
+        dominio = cfg.get('dominio', 'unilova.mektia.com')
+        base_url = f"https://{dominio}" if not dominio.startswith('http') else dominio
+        
+        # Extraemos el nombre del archivo (ej: excel_unzip_img_4_1771354691.jpeg)
         filename = os.path.basename(image_url.strip())
         
-        # RECONSTRUCCIÓN TOTAL DE LA URL PÚBLICA
-        # Forzamos que apunte al subdominio correcto del cliente
-        public_url = f"https://{subdominio}.mektia.com/static/uploads/productos/{subdominio}/{filename}"
+        # LA RUTA QUE CONFIRMASTE (OPCIÓN 1)
+        public_url = f"{base_url.rstrip('/')}/uploads/productos/{filename}"
 
         if not phone_id or not token:
-            logger.error(f"🔴 enviar_imagen: Falta ID o Token para {subdominio}")
+            logger.error("🔴 Falta ID o Token en config")
             return False
 
         url_api = f"https://graph.facebook.com/v21.0/{phone_id}/messages"
@@ -376,28 +372,25 @@ def enviar_imagen(numero, image_url, texto=None, config=None):
             'Content-Type': 'application/json'
         }
         
-        # Estructura para que lleguen juntos (Caption)
-        image_data = {
-            'link': public_url
-        }
-        if texto:
-            image_data['caption'] = texto
-
+        # Estructura de un solo mensaje (Imagen con pie de foto)
         payload = {
             'messaging_product': 'whatsapp',
             'to': numero,
             'type': 'image',
-            'image': image_data
+            'image': {
+                'link': public_url,
+                'caption': str(texto).strip() if texto else ""
+            }
         }
 
-        logger.info(f"🚀 DESPEGUE: Enviando a Meta -> {public_url}")
+        logger.info(f"🚀 ENVIANDO CHULADA A META: {public_url}")
         r = requests.post(url_api, headers=headers, json=payload, timeout=15)
         
         if r.status_code in (200, 201, 202):
-            logger.info(f"✅ ¡CHULADA ENVIADA! Imagen + Texto a {numero}")
+            logger.info(f"✅ ¡OPERACIÓN CERRADA! Imagen enviada a {numero}")
             return True
         else:
-            logger.error(f"🔴 Error Meta: {r.status_code} - {r.text}")
+            logger.error(f"🔴 Error Meta: {r.text}")
             return False
 
     except Exception as e:
