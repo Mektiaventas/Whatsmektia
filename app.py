@@ -10324,6 +10324,14 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
 
     if producto_aplica == "SI_APLICA" and texto:
         precios = obtener_productos_por_palabra_clave(contexto_busqueda, config, limite=200, contexto_ia=contexto_ia_final)
+        # --- PEGAR ESTO JUSTO DEBAJO ---
+        if precios:
+            app.logger.info(f"🚀 Enviando {len(precios)} fichas encontradas a {numero}")
+            for p in precios:
+                texto_ficha = f"*{p.get('modelo', 'Producto')}*\n\n{p.get('descripcion', '')}\n\n💰 *Precio:* ${p.get('precio')}"
+                enviar_imagen(numero, p.get('imagen_url'), texto=texto_ficha, config=config)
+            return "OK" # <--- Esto corta el flujo y evita que mande el saludo basura
+        # -------------------------------
         solicita_imagen = solicita_imagen_ia
         if not solicita_imagen and any(x in texto.lower() for x in ['foto', 'imagen', 'verla', 'muestras', 'enseñas']):
             solicita_imagen = True
