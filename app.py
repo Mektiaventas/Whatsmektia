@@ -10329,8 +10329,16 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
             app.logger.info(f"🚀 Enviando {len(precios)} fichas encontradas a {numero}")
             for p in precios:
                 texto_ficha = f"*{p.get('modelo', 'Producto')}*\n\n{p.get('descripcion', '')}\n\n💰 *Precio:* ${p.get('precio')}"
-                enviar_imagen(numero, p.get('imagen_url'), texto=texto_ficha, config=config)
-            return "OK" # <--- Esto corta el flujo y evita que mande el saludo basura
+                
+                # VALIDACIÓN DE IMAGEN
+                img_url = p.get('imagen_url')
+                if img_url and str(img_url).strip():
+                    enviar_imagen(numero, img_url, texto=texto_ficha, config=config)
+                else:
+                    # Si no hay imagen, enviamos solo el texto para no perder la venta
+                    enviar_mensaje_texto(numero, texto_ficha, config=config)
+            
+            return "OK"
         # -------------------------------
         solicita_imagen = solicita_imagen_ia
         if not solicita_imagen and any(x in texto.lower() for x in ['foto', 'imagen', 'verla', 'muestras', 'enseñas']):
