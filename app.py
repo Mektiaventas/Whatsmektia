@@ -10944,16 +10944,45 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
   
 def obtener_configuracion_por_host():
     try:
+        from services import get_db_connection, get_cliente_by_subdomain
+        
         raw_host = request.host.lower().split(':')[0]
         subdominio = raw_host.split('.')[0]
-        # Si no hay subdominio o es el principal, forzamos buscar 'mektia'
+        
+        # Lógica de default que ya tenías
         if subdominio in ['www', 'smartwhats', 'mektia'] or '.' not in request.host:
             subdominio = 'mektia'
-        # Buscamos en la DB
+
+        # 1. Obtenemos datos técnicos de la base 'clientes'
         config = get_cliente_by_subdomain(subdominio)
+        
         if config:
+            # 2. SEGUNDO SALTO: Traer la personalidad de la IA de la base del tenant
+            tenant_db = config.get('db_name')
+            try:
+                # Usamos tu pool de conexiones para entrar a la BD del cliente
+                conn = get_db_connection({'db_name': tenant_db})
+                cur = conn.cursor(dictionary=True)
+                
+                # Traemos TODO de la tabla configuracion (ia_nombre, que_hace, eslogan, etc.)
+                cur.execute("SELECT * FROM configuracion LIMIT 1")
+                datos_ia = cur.fetchone()
+                
+                cur.close()
+                conn.close()
+                
+                if datos_ia:
+                    # Fusionamos: ahora config tendrá tokens + personalidad
+                    config.update(datos_ia)
+                    # Agregamos el subdominio para el socket CRM
+                    config['subdominio_actual'] = subdominio 
+                    
+            except Exception as ex:
+                logger.error(f"⚠️ No se pudo leer la tabla 'configuracion' en {tenant_db}: {ex}")
+            
             return config
-        # Si no existe en la DB, regresamos un default básico (Mektia)
+
+        # Default en caso de que no exista el cliente
         return {
             'db_name': 'mektia',
             'db_host': 'localhost',
