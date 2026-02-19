@@ -10243,8 +10243,10 @@ EJEMPLOS:
         
 def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
     """
-    Versión FULL OPTIMIZADA: Envía imagen con ficha técnica como caption
-    y evita el doble mensaje genérico cuando hay productos.
+    Versión DEFINITIVA: 
+    1. Orquestador: procesar_mensaje_unificado.
+    2. Formato: Imagen + Texto (Caption) en un solo globo.
+    3. Flujo: Si hay productos, envía ficha y termina (evita doble saludo).
     """
     try:
         # --- DeepSeek Product & Visual Intent Detection ---
@@ -10268,14 +10270,10 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
             "Instrucciones:\n"
             "1. Si el usuario busca un producto, responde: SEARCH: <término preciso>\n"
             "2. Si la intención implica VER/RECIBIR el producto, agrega: | SHOW: YES\n"
-            "3. Si SHOW: YES, tu respuesta de texto debe ser SOLO UNA FRASE (ej: 'Aquí tienes los detalles:'). NO expliques nada del producto aquí.\n"
+            "3. Si SHOW: YES, tu respuesta de texto debe ser SOLO UNA FRASE corta.\n"
             "4. Si NO hay imágenes (SHOW: NO), entonces sí explica precios y detalles.\n\n"
             "5. SI EL USUARIO PIDE HABLAR CON UN ASESOR, HUMANO O PERSONA, responde: TRANSFERIR_ASESOR\n\n"
-            "6. SI EL USUARIO QUIERE AGENDAR UNA CITA: responde AGENDAR_CITA. Tu respuesta de texto debe ser solo: '¡Claro! Con gusto te ayudo. ¿Qué día y hora te gustaría?'\n\n"
-            "Ejemplos:\n"
-            "- U: 'muéstrame el Sainz' -> SEARCH: Escritorio Sainz | SHOW: YES\n"
-            "- U: 'precio del escritorio' -> SEARCH: Escritorio | SHOW: NO\n"
-            "- U: 'hola' -> NO_APLICA\n\n"
+            "6. SI EL USUARIO QUIERE AGENDAR UNA CITA: responde AGENDAR_CITA.\n\n"
             "HISTORIAL:\n"
             f"{historial_text.strip()}\n\n"
             "MENSAJE ACTUAL:\n"
@@ -10294,10 +10292,7 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
         resp_ds.raise_for_status()
         ds_data = resp_ds.json()
         raw_ds = ds_data['choices'][0]['message']['content']
-        if isinstance(raw_ds, list):
-            raw_ds = "".join([(r.get('text') if isinstance(r, dict) else str(r)) for r in raw_ds])
         raw_ds = (raw_ds or "").strip()
-        raw_upper = raw_ds.upper() 
 
         if "SEARCH:" in raw_ds:
             producto_aplica = "SI_APLICA"
@@ -10307,9 +10302,8 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
                     solicita_imagen_ia = True
                 contexto_busqueda = rest.split('|')[0].strip().strip('"').strip("'")
             except IndexError: pass
-        elif "AGENDAR_CITA" in raw_upper:
-            app.logger.info("📅 IA detectó: SOLICITUD DE CITA.")
-            save_cita_inicial = {'servicio_solicitado': contexto_busqueda if producto_aplica == "SI_APLICA" else None, 'telefono': numero}
+        elif "AGENDAR_CITA" in raw_ds.upper():
+            save_cita_inicial = {'servicio_solicitado': contexto_busqueda, 'telefono': numero}
             manejar_guardado_cita_unificado(save_cita=save_cita_inicial, intent="AGENDAR_CITA", numero=numero, texto=texto, historial=historial_objs, catalog_list=[], respuesta_text=None, incoming_saved=incoming_saved, config=config)
             return True
         elif "TRANSFERIR_ASESOR" in raw_ds.upper():
@@ -10318,16 +10312,13 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
             return True
         elif "SI_APLICA" in raw_ds:
             producto_aplica = "SI_APLICA"
-        else:
-            m = re.search(r'\b(SI_APLICA|NO_APLICA)\b', raw_ds.upper())
-            if m: producto_aplica = m.group(1)
 
     except Exception as e:
         app.logger.warning(f"⚠️ DeepSeek error: {e}")
         if any(kw in (texto or "").lower() for kw in ['precio', 'foto', 'ver']):
             producto_aplica = "SI_APLICA"
 
-    # --- Lógica de Fichas (CASCADA ORIGINAL) ---
+    # --- Lógica de Búsqueda de Productos ---
     precios = [] 
     productos_para_ficha = [] 
 
@@ -10339,120 +10330,51 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
 
         if solicita_imagen and precios:
             termino = contexto_busqueda.lower().strip()
-            texto_msg = texto.lower()
-            match_sku = [p for p in precios if termino == (p.get('sku') or '').lower() or (p.get('sku') or '').lower() in texto_msg]
-            match_modelo = [p for p in precios if termino in (p.get('modelo') or '').lower() or termino in (p.get('linea') or '').lower()]
-            match_categoria = [p for p in precios if termino in (p.get('categoria') or '').lower() or termino in (p.get('subcategoria') or '').lower()]
-            match_desc = [p for p in precios if termino in (p.get('descripcion') or '').lower()]
-
+            # Filtro simple para elegir los mejores candidatos
+            match_sku = [p for p in precios if termino == (p.get('sku') or '').lower()]
             if match_sku:
-                precios_imagenes, cantidad_imagenes = match_sku, 1
-            elif match_modelo:
-                precios_imagenes, cantidad_imagenes = match_modelo, (1 if len(match_modelo) == 1 else 3)
-            elif match_categoria:
-                precios_imagenes, cantidad_imagenes = match_categoria, 3
+                productos_para_ficha = match_sku[:1]
             else:
-                precios_imagenes, cantidad_imagenes = match_desc, 3
-
-            if any(w in texto_msg for w in ['todos', 'todas', 'todo', 'catálogo']):
-                precios_imagenes, cantidad_imagenes = precios, min(10, len(precios))
-
-            productos_para_ficha = precios_imagenes[:cantidad_imagenes]
-
-        # Inyectar SKUs específicos si se mencionan
-        for p in precios[:5]:
-            img_url = p.get('imagen')
-            sku_p = p.get('sku', '')
-            if img_url and sku_p and sku_p.lower() in texto.lower():
-                if p not in productos_para_ficha: productos_para_ficha.insert(0, p)
-
-        # Relleno de categorías
-        if len(precios) < 30:
-            cat_det = detectar_categoria_del_mensaje(texto)
-            if cat_det:
-                prods = obtener_productos_por_categoria(cat_det, config, limite=100)
-                skus = {p.get('sku') for p in precios}
-                for prod in prods:
-                    if prod.get('sku') not in skus: precios.append(prod)
+                productos_para_ficha = precios[:3] # Mandar máximo 3 fichas
     
-    else:
-        # CHARLA GENERAL / IDENTIDAD
-        try:
-            data_db = load_config(config)
-            if data_db and 'negocio' in data_db:
-                config.update(data_db['negocio'])
-                config.update(data_db['personalizacion'])
-                config.update(data_db['restricciones'])
-        except Exception as e: app.logger.error(f"❌ Falló load_config: {e}")
-
-        generar_respuesta_deepseek(numero=numero, texto=texto, precios=[], historial=obtener_historial(numero, limite=6, config=config), config=config, incoming_saved=incoming_saved, es_audio=es_audio)
-        return True 
-
-    # --- EJECUCIÓN FINAL Y FORMATO (CORREGIDO) ---
-    
-    # Si NO hay productos para mostrar ficha con imagen, enviamos respuesta de texto normal
+    # --- Si NO hay productos o no se pidió verlos, se usa la charla normal ---
     if not productos_para_ficha:
-        generar_respuesta_deepseek(
-            numero=numero, 
-            texto=texto, 
-            precios=precios, 
-            historial=obtener_historial(numero, limite=6, config=config), 
-            config=config, 
-            incoming_saved=incoming_saved, 
-            es_audio=es_audio
-        )
+        generar_respuesta_deepseek(numero=numero, texto=texto, precios=precios, historial=obtener_historial(numero, limite=6, config=config), config=config, incoming_saved=incoming_saved, es_audio=es_audio)
         return True
 
-    # Si HAY productos, enviamos la imagen con la ficha como caption
-    # Omitimos generar_respuesta_deepseek aquí para evitar el saludo genérico doble
+    # --- Si HAY productos para ficha, enviamos la "Chulada" ---
     for p in productos_para_ficha:
         img_url = p.get('imagen')
         sku_p = p.get('sku', '') or 'S/N'
-        titulo_ficha = p.get('servicio') or p.get('modelo') or 'Producto'
+        titulo_p = p.get('servicio') or p.get('modelo') or 'Producto'
         
-        # --- Formateo de Precios ---
+        # Formateo de Precios
         lineas_p = []
-        mapeo = [('precio_menudeo', 'Menudeo'), ('precio_mayoreo', 'Mayoreo'), ('inscripcion', 'Inscripción'), ('mensualidad', 'Mensualidad'), ('precio', 'Precio')]
-        for llave, etiqueta in mapeo:
-            valor = p.get(llave)
-            try:
-                if valor and float(valor) > 0: lineas_p.append(f"💰 *{etiqueta}:* ${valor}")
-            except: continue
-
+        for llave, etiqueta in [('precio_menudeo', 'Menudeo'), ('precio_mayoreo', 'Mayoreo'), ('inscripcion', 'Inscripción'), ('mensualidad', 'Mensualidad'), ('precio', 'Precio')]:
+            val = p.get(llave)
+            if val and str(val) != '0': lineas_p.append(f"💰 *{etiqueta}:* ${val}")
+        
         precios_wa = "\n".join(lineas_p) if lineas_p else "💰 *Precio:* Consultar"
-        
-        # --- Formateo de Medidas ---
-        med = str(p.get('medidas') or "").strip()
-        med_wa = f"📏 *Medidas:* {med}\n" if med and med not in ['0', '0.00', ''] else ""
+        desc_wa = p.get('descripcion') or ''
+        if len(desc_wa) > 160: desc_wa = desc_wa[:157] + "..."
 
-        # --- Formateo de Descripción ---
-        desc_raw = p.get('descripcion') or ''
-        desc_wa = (desc_raw[:150] + "...") if len(desc_raw) > 150 else desc_raw
-
-        # TEXTO FINAL WHATSAPP (CAPTION)
-        ficha_caption = (
-            f"🔹 *{titulo_ficha.upper()}*\n\n"
+        # EL CAPTION (El texto que va pegado a la imagen)
+        ficha_wa = (
+            f"🔹 *{titulo_p.upper()}*\n\n"
             f"{precios_wa}\n"
-            f"{med_wa}"
             f"📝 {desc_wa}\n\n"
-            f"🆔 *SKU:* {sku_p}\n\n"
-            "¿Te gustaría más información o agendar una visita?"
+            f"🆔 *SKU:* {sku_p}"
         )
-        
-        # TEXTO FINAL WEB (HTML)
-        ficha_web = f"<b>{titulo_ficha}</b><br>{precios_wa.replace('💰 *', '💰 <b>').replace('*:', ':</b>')}<br>{med_wa.replace('📏 *', '📏 <b>').replace('*:', ':</b>')}📝 {desc_wa}<br>🆔 <b>SKU:</b> {sku_p}"
 
-        if img_url and img_url.strip():
-            try:
-                # Forzamos el envío de imagen con parámetros nombrados para asegurar consistencia
-                enviar_imagen(numero=numero, image_url=img_url, texto=ficha_caption, config=config)
-                actualizar_respuesta(numero=numero, mensaje=texto, respuesta=ficha_web, config=config, respuesta_tipo='imagen', respuesta_media_url=img_url)
-                time.sleep(1.5)
-            except Exception as e: 
-                app.logger.error(f"❌ Error enviando ficha de {sku_p}: {e}")
+        if img_url:
+            # ENVIAR IMAGEN + TEXTO JUNTOS
+            enviar_imagen(numero=numero, image_url=img_url, texto=ficha_wa, config=config)
+            # Guardar en el chat del dashboard
+            actualizar_respuesta(numero, texto, f"Ficha enviada: {titulo_p}", config, respuesta_tipo='imagen', respuesta_media_url=img_url)
+            time.sleep(1)
 
-    return True
-        
+    return True # Finaliza el proceso para que app.py no mande nada más.
+    
 def guardar_respuesta_sistema(numero, respuesta, config=None, respuesta_tipo='alerta_interna', respuesta_media_url=None):
     if config is None:
         config = obtener_configuracion_por_host()
