@@ -7332,16 +7332,6 @@ def obtener_asesores_por_user(username, default=2, cap=20):
         app.logger.warning(f"⚠️ obtener_asesores_por_user falló para user={username}: {e}")
         return default
 
-def obtener_configuracion_numero(numero_whatsapp):
-    """Obtiene la configuración específica para un número de WhatsApp"""
-    # Buscar en la configuración multi-tenant
-    for numero_config, config in NUMEROS_CONFIG.items():
-        if numero_whatsapp.endswith(numero_config) or numero_whatsapp == numero_config:
-            return config
-    
-    # Fallback a configuración por defecto (Mektia)
-    return NUMEROS_CONFIG['524495486142']
-
 def obtener_imagen_perfil_alternativo(numero, config=None):
     """Método alternativo para obtener la imagen de perfil"""
     if config is None:
