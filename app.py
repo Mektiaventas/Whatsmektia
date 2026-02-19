@@ -10920,6 +10920,11 @@ def obtener_configuracion_por_host():
         config = get_cliente_by_subdomain(subdominio)
         
         if config:
+            # --- TRADUCCIÓN DE NOMBRES (De Base Maestra a Código) ---
+            # Esto hace que config['phone_number_id'] tenga el valor de wa_phone_id de la BD
+            config['phone_number_id'] = config.get('wa_phone_id')
+            config['whatsapp_token'] = config.get('wa_token')
+            
             tenant_db = config.get('db_name')
             app.logger.info(f"🔍 DEBUG: Cliente encontrado. BD Tenant: {tenant_db}")
             
@@ -10927,6 +10932,7 @@ def obtener_configuracion_por_host():
                 conn = get_db_connection({'db_name': tenant_db})
                 cur = conn.cursor(dictionary=True)
                 
+                # Intentamos sacar el resto de la configuración de la tabla local
                 cur.execute("SELECT * FROM configuracion LIMIT 1")
                 datos_ia = cur.fetchone()
                 
@@ -10935,10 +10941,9 @@ def obtener_configuracion_por_host():
                 
                 if datos_ia:
                     app.logger.info(f"🔍 DEBUG: ¡Personalidad encontrada! Nombre IA: {datos_ia.get('ia_nombre')}")
+                    # Combinamos todo. Si algo falta en la maestra, lo podría completar datos_ia
                     config.update(datos_ia)
-                else:
-                    app.logger.warning(f"🔍 DEBUG: La tabla 'configuracion' en {tenant_db} está VACÍA.")
-                    
+                
             except Exception as ex:
                 app.logger.error(f"❌ DEBUG: Error conectando a la base {tenant_db}: {ex}")
             
