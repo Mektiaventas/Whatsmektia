@@ -345,7 +345,7 @@ def enviar_mensaje(numero, texto, config=None):
 def enviar_imagen(numero, image_url, texto=None, config=None):
     """
     LA CHULADA CONFIRMADA: Envía imagen + texto (caption) en un solo globo.
-    Usa la ruta directa confirmada: https://dominio/uploads/productos/archivo.ext
+    Corregido: Ahora apunta a la ruta real /static/uploads/productos/{cliente}/{archivo}
     """
     try:
         cfg = config or {}
@@ -356,11 +356,20 @@ def enviar_imagen(numero, image_url, texto=None, config=None):
         dominio = cfg.get('dominio', 'unilova.mektia.com')
         base_url = f"https://{dominio}" if not dominio.startswith('http') else dominio
         
-        # Extraemos el nombre del archivo (ej: excel_unzip_img_4_1771354691.jpeg)
+        # Obtenemos el nombre de la carpeta del cliente (ej: unilova)
+        # Si no viene en la config, usamos el que vimos en tu 'ls'
+        cliente_folder = cfg.get('bd_name', 'unilova')
+        
+        # Limpieza y extracción del nombre del archivo
+        if not image_url or not str(image_url).strip():
+            logger.error("🔴 No hay URL de imagen para procesar")
+            return False
+            
         filename = os.path.basename(image_url.strip())
         
-        # LA RUTA QUE CONFIRMASTE (OPCIÓN 1)
-        public_url = f"{base_url.rstrip('/')}/uploads/productos/{filename}"
+        # RUTA REAL CONFIRMADA POR TU TERMINAL:
+        # Agregamos /static/ y la subcarpeta del cliente específica
+        public_url = f"{base_url.rstrip('/')}/static/uploads/productos/{cliente_folder}/{filename}"
 
         if not phone_id or not token:
             logger.error("🔴 Falta ID o Token en config")
@@ -390,11 +399,14 @@ def enviar_imagen(numero, image_url, texto=None, config=None):
             logger.info(f"✅ ¡OPERACIÓN CERRADA! Imagen enviada a {numero}")
             return True
         else:
+            # Si Meta falla, logueamos el porqué (importante si la URL sigue sin gustarle)
             logger.error(f"🔴 Error Meta: {r.text}")
             return False
 
     except Exception as e:
+        import traceback
         logger.error(f"🔴 Error en enviar_imagen: {str(e)}")
+        logger.error(traceback.format_exc())
         return False
 def enviar_documento(numero, file_url, filename, config=None):
     """Enviar documento por link con logging diagnóstico y mejor manejo de URLs."""
