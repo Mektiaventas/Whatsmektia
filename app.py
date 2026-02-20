@@ -10327,21 +10327,21 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
         # --- PEGAR ESTO JUSTO DEBAJO ---
         if precios:
             # Usamos 'modelo' o 'sku' si modelo está vacío. 
-                # Usamos 'precio_menudeo' que es donde tienes los 1800.00
-                titulo = p.get('modelo').strip() if p.get('modelo') and p.get('modelo').strip() else p.get('sku')
-                texto_ficha = f"*{titulo}*\n\n{p.get('descripcion', '')}\n\n💰 *Precio:* ${p.get('precio_menudeo')}"
-                
-                # LA CLAVE AQUÍ ES 'imagen', no 'imagen_url'
-                img_nombre = p.get('imagen') 
-                
-                if img_nombre:
-                    # enviar_imagen ya construye la ruta /static/uploads/productos/unilova/
-                    enviar_imagen(numero, img_nombre, texto=texto_ficha, config=config)
-                else:
-                    # Fallback por si acaso
-                    enviar_whatsapp(numero, texto_ficha, config=config)
+            # Usamos 'precio_menudeo' que es donde tienes los 1800.00
+            titulo = p.get('modelo').strip() if p.get('modelo') and p.get('modelo').strip() else p.get('sku')
+            texto_ficha = f"*{titulo}*\n\n{p.get('descripcion', '')}\n\n💰 *Precio:* ${p.get('precio_menudeo')}"
             
-            return "OK"
+            # LA CLAVE AQUÍ ES 'imagen', no 'imagen_url'
+            img_nombre = p.get('imagen') 
+            
+            if img_nombre:
+                # enviar_imagen ya construye la ruta /static/uploads/productos/unilova/
+                enviar_imagen(numero, img_nombre, texto=texto_ficha, config=config)
+            else:
+                # Fallback por si acaso
+                enviar_whatsapp(numero, texto_ficha, config=config)
+        
+        return "OK"
         # -------------------------------
         solicita_imagen = solicita_imagen_ia
         if not solicita_imagen and any(x in texto.lower() for x in ['foto', 'imagen', 'verla', 'muestras', 'enseñas']):
