@@ -10319,48 +10319,57 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
             producto_aplica = "SI_APLICA"
 
     # --- Lógica de Búsqueda de Productos ---
+    # --- Lógica de Búsqueda de Productos ---
     precios = [] 
     productos_para_ficha = [] 
 
     if producto_aplica == "SI_APLICA" and texto:
         precios = obtener_productos_por_palabra_clave(contexto_busqueda, config, limite=200, contexto_ia=contexto_ia_final)
-        # --- PEGAR ESTO JUSTO DEBAJO ---
-        if precios:
-            # Usamos 'modelo' o 'sku' si modelo está vacío. 
-            # Usamos 'precio_menudeo' que es donde tienes los 1800.00
-            titulo = p.get('modelo').strip() if p.get('modelo') and p.get('modelo').strip() else p.get('sku')
-            texto_ficha = f"*{titulo}*\n\n{p.get('descripcion', '')}\n\n💰 *Precio:* ${p.get('precio_menudeo')}"
-            
-            # LA CLAVE AQUÍ ES 'imagen', no 'imagen_url'
-            img_nombre = p.get('imagen') 
-            
-            if img_nombre:
-                # enviar_imagen ya construye la ruta /static/uploads/productos/unilova/
-                enviar_imagen(numero, img_nombre, texto=texto_ficha, config=config)
-            else:
-                # Fallback por si acaso
-                enviar_whatsapp(numero, texto_ficha, config=config)
         
-        return "OK"
-        # -------------------------------
         solicita_imagen = solicita_imagen_ia
-        if not solicita_imagen and any(x in texto.lower() for x in ['foto', 'imagen', 'verla', 'muestras', 'enseñas']):
+        if not solicita_imagen and any(x in (texto or "").lower() for x in ['foto', 'imagen', 'verla', 'muestras', 'enseñas']):
             solicita_imagen = True
 
         if solicita_imagen and precios:
-            termino = contexto_busqueda.lower().strip()
-            # Filtro simple para elegir los mejores candidatos
+            termino = (contexto_busqueda or "").lower().strip()
             match_sku = [p for p in precios if termino == (p.get('sku') or '').lower()]
             if match_sku:
                 productos_para_ficha = match_sku[:1]
             else:
-                productos_para_ficha = precios[:3] # Mandar máximo 3 fichas
-    
-    # --- Si NO hay productos o no se pidió verlos, se usa la charla normal ---
+                productos_para_ficha = precios[:3]
+
     if not productos_para_ficha:
         generar_respuesta_deepseek(numero=numero, texto=texto, precios=precios, historial=obtener_historial(numero, limite=6, config=config), config=config, incoming_saved=incoming_saved, es_audio=es_audio)
         return True
 
+    for p in productos_para_ficha:
+        img_url = p.get('imagen') # Columna correcta
+        sku_p = p.get('sku', '') or 'S/N'
+        titulo_p = p.get('servicio') or p.get('modelo') or p.get('sku') or 'Producto'
+        
+        lineas_p = []
+        for llave, etiqueta in [('precio_menudeo', 'Menudeo'), ('precio_mayoreo', 'Mayoreo'), ('inscripcion', 'Inscripción'), ('mensualidad', 'Mensualidad'), ('precio', 'Precio')]:
+            val = p.get(llave)
+            if val and str(val) != '0' and str(val) != '0.00': 
+                lineas_p.append(f"💰 *{etiqueta}:* ${val}")
+        
+        precios_wa = "\n".join(lineas_p) if lineas_p else "💰 *Precio:* Consultar"
+        desc_wa = p.get('descripcion') or ''
+        if len(desc_wa) > 300: desc_wa = desc_wa[:297] + "..."
+
+        ficha_wa = (
+            f"🔹 *{titulo_p.upper()}*\n\n"
+            f"{precios_wa}\n"
+            f"📝 {desc_wa}\n\n"
+            f"🆔 *SKU:* {sku_p}"
+        )
+
+        if img_url:
+            enviar_imagen(numero=numero, image_url=img_url, texto=ficha_wa, config=config)
+            actualizar_respuesta(numero, texto, f"Ficha enviada: {titulo_p}", config, respuesta_tipo='imagen', respuesta_media_url=img_url)
+            time.sleep(1)
+
+    return True
     # --- Si HAY productos para ficha, enviamos la "Chulada" ---
     for p in productos_para_ficha:
         img_url = p.get('imagen')
