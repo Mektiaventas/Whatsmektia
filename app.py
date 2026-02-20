@@ -10326,15 +10326,20 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
         precios = obtener_productos_por_palabra_clave(contexto_busqueda, config, limite=200, contexto_ia=contexto_ia_final)
         # --- PEGAR ESTO JUSTO DEBAJO ---
         if precios:
-            app.logger.info(f"🚀 Enviando {len(precios)} fichas encontradas a {numero}")
-            for p in precios:
-                texto_ficha = f"*{p.get('modelo', 'Producto')}*\n\n{p.get('descripcion', '')}\n\n💰 *Precio:* ${p.get('precio')}"
+            # Usamos 'modelo' o 'sku' si modelo está vacío. 
+                # Usamos 'precio_menudeo' que es donde tienes los 1800.00
+                titulo = p.get('modelo').strip() if p.get('modelo') and p.get('modelo').strip() else p.get('sku')
+                texto_ficha = f"*{titulo}*\n\n{p.get('descripcion', '')}\n\n💰 *Precio:* ${p.get('precio_menudeo')}"
                 
-                # Si no hay imagen, mandamos un espacio para que no sea None y no truene el .strip()
-                img_url = p.get('imagen_url') if p.get('imagen_url') else " "
+                # LA CLAVE AQUÍ ES 'imagen', no 'imagen_url'
+                img_nombre = p.get('imagen') 
                 
-                # Usamos la única función que el log confirmó que existe
-                enviar_imagen(numero, img_url, texto=texto_ficha, config=config)
+                if img_nombre:
+                    # enviar_imagen ya construye la ruta /static/uploads/productos/unilova/
+                    enviar_imagen(numero, img_nombre, texto=texto_ficha, config=config)
+                else:
+                    # Fallback por si acaso
+                    enviar_whatsapp(numero, texto_ficha, config=config)
             
             return "OK"
         # -------------------------------
