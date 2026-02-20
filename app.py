@@ -431,6 +431,7 @@ def proteger_rutas():
         '/uploads/',
         '/uploads',   # cubrir '/uploads' sin slash final
         '/static/images/',
+        '/static/uploads/',    # <--- AGREGA ESTA LÍNEA (Es la que usa Meta)
         '/static/audio/',
         '/proxy-audio',   # <--- AGREGA ESTA LÍNEA (con guion medio como sale en tu log pero sin slash al final)
         '/proxy-audio/',   # <--- AGREGA ESTA LÍNEA (con guion medio como sale en tu log)
