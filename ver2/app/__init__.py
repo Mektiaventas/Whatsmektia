@@ -12,12 +12,15 @@ def create_app():
     Config.init_app(app)
 
     with app.app_context():
-        # 3. Importamos y registramos las rutas (Blueprints)
-        # Esto evita que el archivo __init__.py se vuelva un "monstruo"
+        # --- REGISTRO DE BLUEPRINTS ---
+        # Los agrupamos aquí para mantener el orden
         from .routes import main_bp
-        app.register_blueprint(main_bp)
+        from .webhook_recepcion import webhook_bp
         
-        # Ruta de salud simple para verificar el puerto 5003
+        app.register_blueprint(main_bp)
+        app.register_blueprint(webhook_bp)
+        
+        # --- RUTAS GLOBALES DE SISTEMA ---
         @app.route('/check', methods=['GET'])
         def check():
             return {
