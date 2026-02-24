@@ -33,6 +33,13 @@ def recibir_mensajes():
                     if 'messages' in value:
                         message = value['messages'][0]
                         user_phone = message.get('from')
+                        # --- EL AJUSTE AQUÍ ---
+                        # Meta envía 521 (inválido para envío), nosotros necesitamos 52 (válido)
+                        if user_phone.startswith('521'):
+                            user_phone = '52' + user_phone[3:]
+                            print(f"♻️ Número ajustado de 521 a: {user_phone}")
+                        # ----------------------
+
                         user_text = message.get('text', {}).get('body')
                         
                         print(f"📩 De: {user_phone} | Mensaje: {user_text}")
