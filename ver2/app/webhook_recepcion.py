@@ -90,9 +90,14 @@ def recibir_mensajes():
             conn_tenant = get_db_connection(config_db)
             
             # --- FLUJO DE MEMORIA Y GUARDADO ---
-            
+            # --- LOG DE ENTRADA ---
+            print(f"\n" + "="*50)
+            print(f"📩 MENSAJE RECIBIDO de {user_phone} ({tenant_slug})")
+            print(f"📝 Texto: {user_text}")
+            print("-"*50)
             # A. Obtener historial previo
             historial_previo = obtener_historial(conn_tenant, user_phone)
+            print(f"📚 Contexto recuperado: {len(historial_previo)} mensajes previos.")
             
             # B. Guardar el mensaje del usuario y obtener ID
             mensaje_id = guardar_mensaje(conn_tenant, user_phone, user_text, tenant_slug)
@@ -115,11 +120,15 @@ def recibir_mensajes():
                 messages=messages_ia
             )
             respuesta_ia = completion.choices[0].message.content
-
+            
+            # --- LOG DE SALIDA ---
+            print(f"🤖 IA ({brain['ia_nombre']}) RESPONDE:")
+            print(f"💬 {respuesta_ia}")
+            print("="*50 + "\n")
+            
             # F. Guardar la respuesta de la IA
             guardar_respuesta(conn_tenant, mensaje_id, respuesta_ia)
             conn_tenant.commit()
-            
             conn_tenant.close()
 
             # 3. Enviar a WhatsApp
