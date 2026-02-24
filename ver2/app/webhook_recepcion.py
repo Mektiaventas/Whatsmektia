@@ -46,7 +46,7 @@ def recibir_mensajes():
                 print(f"⚠️ El Phone ID {phone_id_receptor} no está registrado.")
                 return make_response("NOT_FOUND", 200)
 
-            # 3. Obtener el "Cerebro" de la IA (unilova.configuracion)
+            # 3. Obtener el "Cerebro" de la IA dinámicamente
             config_db = Config.get_tenant_config(tenant_slug)
             conn_tenant = get_db_connection(config_db)
             cur_t = conn_tenant.cursor(dictionary=True)
@@ -58,13 +58,12 @@ def recibir_mensajes():
             cur_t.close()
             conn_tenant.close()
 
-            # 4. Construir el Prompt de LOVA
+            # 4. Construir el Prompt (Ahora usa brain['ia_nombre'] real)
             prompt_sistema = (
                 f"Eres {brain['ia_nombre']}, {brain['que_hace']}. "
                 f"Tu negocio es {brain['negocio_nombre']}. "
                 f"Tono: {brain['tono']}. Lenguaje: {brain['lenguaje']}. "
                 f"RESTRICCIONES IMPORTANTES: {brain['restricciones']}. "
-                f"Responde siempre de forma amable pero buscando el cierre de venta o registro."
             )
 
             # 5. Consultar a DeepSeek
@@ -73,14 +72,16 @@ def recibir_mensajes():
                 messages=[
                     {"role": "system", "content": prompt_sistema},
                     {"role": "user", "content": user_text}
-                ],
-                temperature=0.7 # Un poco de creatividad para el tono animado
+                ]
             )
             respuesta_ia = completion.choices[0].message.content
 
-            # 6. Enviar a WhatsApp
-            enviar_texto(user_phone, respuesta_ia, config_db)
-            print(f"✅ LOVA respondió a {user_phone} (Tenant: {tenant_slug})")
+            # 6. Enviar a WhatsApp y ver el resultado real
+            resultado_meta = enviar_texto(user_phone, respuesta_ia, config_db)
+            
+            # EL PRINT AHORA ES DINÁMICO
+            print(f"✅ {brain['ia_nombre']} respondió a {user_phone} (Tenant: {tenant_slug})")
+            print(f"📩 Resultado Meta: {resultado_meta}")
 
     except Exception as e:
         print(f"❌ ERROR EN WEBHOOK: {e}")
