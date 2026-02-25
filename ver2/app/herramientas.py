@@ -59,15 +59,16 @@ def buscar_productos(conn, query_texto):
             params.extend([p_like] * len(columnas_busqueda))
 
         # CAMBIO: Bajamos LIMIT a 5 para evitar que la IA se atore
+        # CAMBIO: Usamos OR en lugar de AND para no ser estrictos
+        # Y ordenamos por el score que ya calculamos arriba
         sql = f"""
             SELECT *, ({' + '.join(relevancia_parts)}) AS score
             FROM precios
-            WHERE ({' AND '.join(where_parts)})
+            WHERE ({' OR '.join(where_parts)})
             AND (status_ws IS NULL OR status_ws IN ('activo', ' ', '1'))
             ORDER BY score DESC
             LIMIT 5
         """
-
         cur.execute(sql, params)
         resultados = cur.fetchall()
 
