@@ -2,34 +2,43 @@ import mysql.connector
 
 def buscar_productos(conn, query_texto):
     """
-    Esta función hace una búsqueda inteligente en la tabla precios.
-    Filtra por SKU o Descripción para no saturar a la IA.
+    Busca productos en la tabla precios.
     """
-    cur = conn.cursor(dictionary=True)
-    # Limpiamos el texto para evitar caracteres raros
-    terminos = query_texto.split()
+    print(f"🔍 BUSCANDO EN DB: {query_texto}")
     
-    # Construimos una búsqueda flexible
-    sql = "SELECT sku, categoria, descripcion, precio_menudeo, moneda FROM precios WHERE "
+    cur = conn.cursor(dictionary=True)
+    
+    # Limpiamos el texto y lo dividimos en palabras
+    palabras = query_texto.split()
+    
+    # Esta es la consulta a la base de datos
+    sql = "SELECT sku, descripcion, precio_menudeo, moneda FROM precios WHERE "
     condiciones = []
     valores = []
     
-    for t in terminos:
-        condiciones.append("(descripcion LIKE %s OR sku LIKE %s OR categoria LIKE %s)")
-        val = f"%{t}%"
-        valores.extend([val, val, val])
+    for p in palabras:
+        if len(p) > 2: # Solo buscamos palabras de más de 2 letras
+            condiciones.append("(descripcion LIKE %s OR sku LIKE %s OR categoria LIKE %s)")
+            val = f"%{p}%"
+            valores.extend([val, val, val])
     
-    sql += " AND ".join(condiciones) + " LIMIT 8" # Limitamos a 8 para no saturar
+    # Si no hay palabras válidas, abortamos
+    if not condiciones:
+        return "No se encontraron términos de búsqueda válidos."
+
+    sql += " AND ".join(condiciones) + " LIMIT 8"
     
     cur.execute(sql, valores)
     resultados = cur.fetchall()
     cur.close()
     
-    if not resultados:
-        return "No se encontraron productos exactos con esos términos."
+    print(f"📦 RESULTADOS ENCONTRADOS: {len(resultados)}")
     
+    if not resultados:
+        return "No se encontraron productos en el catálogo con esos términos."
+    
+    # Convertimos la lista de productos en un texto que la IA entienda
     return str(resultados)
 
 def derivar_a_asesor(motivo):
-    """Marca la conversación para que un humano intervenga."""
-    return f"Se ha solicitado la intervención de un asesor humano por: {motivo}"
+    return f"SOLICITUD DE ASESOR HUMANO: {motivo}"
