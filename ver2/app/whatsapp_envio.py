@@ -8,6 +8,11 @@ API_VERSION = "v22.0"
 
 def enviar_texto(numero, texto, config_tenant):
     """Envía un mensaje de texto plano."""
+    print(f"📤 DEBUG: Intentando enviar texto a {numero}...")
+    if not texto:
+        print("⚠️ DEBUG: Intento de enviar mensaje VACÍO abortado.")
+        return None
+
     url = f"https://graph.facebook.com/{API_VERSION}/{config_tenant['phone_id']}/messages"
     headers = {
         "Authorization": f"Bearer {config_tenant['token']}",
@@ -24,9 +29,11 @@ def enviar_texto(numero, texto, config_tenant):
 
     try:
         response = requests.post(url, headers=headers, json=data, timeout=10)
-        return response.json()
+        res_json = response.json()
+        print(f"📩 DEBUG: Respuesta de Meta: {response.status_code}")
+        return res_json
     except Exception as e:
-        logger.error(f"❌ Error texto: {e}")
+        print(f"❌ DEBUG ERROR enviando texto: {e}")
         return None
 
 def enviar_imagen(numero, url_imagen, leyenda, config_tenant):
