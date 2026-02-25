@@ -28,21 +28,19 @@ def extraer_palabras_clave_inteligente(texto):
 # --- LA FUNCIÓN PRINCIPAL QUE LLAMA LA IA ---
 def buscar_productos(conn, query_texto):
     try:
+        print(f"\n🔍 DEBUG: Iniciando búsqueda para: '{query_texto}'")
         palabras = extraer_palabras_clave_inteligente(query_texto)
-        if not palabras: return "[]"
+        if not palabras: 
+            print("DEBUG: No se extrajeron palabras clave.")
+            return "[]"
 
         cur = conn.cursor(dictionary=True)
-        
-        # 1. Obtener los nombres de las columnas dinámicamente
-        # Esto hace que funcione para cualquier cliente/tenant
         cur.execute("SHOW COLUMNS FROM precios")
         columnas = [col['Field'] for col in cur.fetchall()]
         
-        # Columnas prohibidas o que pesan mucho y no sirven para la IA
         columnas_ignorar = {'id', 'status_ws', 'creado_en', 'actualizado_en', 'id_tenant'}
         columnas_busqueda = [c for c in columnas if c not in columnas_ignorar]
 
-        # 2. Construcción de Query Multicapa Dinámica
         relevancia_parts = []
         where_parts = []
         params = []
@@ -50,55 +48,51 @@ def buscar_productos(conn, query_texto):
         for idx, palabra in enumerate(palabras):
             p_like = f"%{palabra}%"
             peso = 100 - (idx * 10)
-            
-            # Ponderación dinámica sobre todas las columnas
             case_parts = []
             for col in columnas_busqueda:
-                # Prioridad mayor a SKU y Modelo si existen
                 bono = 50 if col.lower() in ['sku', 'modelo', 'codigo'] else 0
                 case_parts.append(f"WHEN LOWER({col}) LIKE %s THEN {peso + bono}")
                 params.append(p_like)
             
             relevancia_parts.append(f"CASE {' '.join(case_parts)} ELSE 0 END")
-            
-            # Filtro WHERE dinámico
             where_parts.append(f"({' OR '.join([f'LOWER({c}) LIKE %s' for c in columnas_busqueda])})")
             params.extend([p_like] * len(columnas_busqueda))
 
+        # CAMBIO: Bajamos LIMIT a 5 para evitar que la IA se atore
         sql = f"""
             SELECT *, ({' + '.join(relevancia_parts)}) AS score
             FROM precios
             WHERE ({' AND '.join(where_parts)})
             AND (status_ws IS NULL OR status_ws IN ('activo', ' ', '1'))
             ORDER BY score DESC
-            LIMIT 10
+            LIMIT 5
         """
 
         cur.execute(sql, params)
         resultados = cur.fetchall()
 
-        # 3. COMPRESIÓN DE DATOS (Para que la IA no se cuelgue)
-        # Solo enviamos campos que tengan valor y limitamos texto largo
         resultados_limpios = []
         for res in resultados:
             item = {}
             for k, v in res.items():
                 if v and k not in columnas_ignorar and k != 'score':
-                    # Si el valor es un texto muy largo, lo recortamos para la IA
                     val_str = str(v)
-                    item[k] = val_str[:100] + "..." if len(val_str) > 120 else v
+                    # Recortamos a 80 caracteres para que el JSON sea ligero
+                    item[k] = val_str[:80] + "..." if len(val_str) > 85 else v
             resultados_limpios.append(item)
 
         cur.close()
         
         if not resultados_limpios:
+            print("DEBUG: Cero resultados encontrados.")
             return "No se encontraron coincidencias exactas."
 
-        print(f"✅ Búsqueda exitosa. Enviando {len(resultados_limpios)} productos a la IA.")
-        return str(resultados_limpios)
+        payload = str(resultados_limpios)
+        print(f"✅ DEBUG: Búsqueda exitosa. Enviando {len(resultados_limpios)} productos. Tamaño: {len(payload)} chars")
+        return payload
 
     except Exception as e:
-        print(f"❌ Error en búsqueda dinámica: {e}")
+        print(f"❌ DEBUG ERROR en buscar_productos: {e}")
         return "[]"
         
 def derivar_a_asesor(conn, motivo=None):
