@@ -121,6 +121,11 @@ def recibir_mensajes():
         
         if 'messages' in value:
             message = value['messages'][0]
+            
+            # --- AQUÍ EXTRAEMOS EL NOMBRE DEL PERFIL DE WHATSAPP ---
+            contact_info = value.get('contacts', [{}])[0]
+            user_name = contact_info.get('profile', {}).get('name', 'Usuario Nuevo')
+            
             phone_id_receptor = value.get('metadata', {}).get('phone_number_id')
             raw_phone = message.get('from')
             user_text = message.get('text', {}).get('body')
@@ -139,10 +144,14 @@ def recibir_mensajes():
             elif phone_id_receptor == Config.get_tenant_config('API_V2').get('wa_phone_id'): tenant_slug = 'API_V2'
             if not tenant_slug: return make_response("NOT_FOUND", 200)
 
-            # 2. Conexión y Datos de IA
+            # 2. Conexión y REGISTRO/ACTUALIZACIÓN DE CONTACTO
             config_db = Config.get_tenant_config(tenant_slug)
             conn_tenant = get_db_connection(config_db)
             
+            # --- LLAMADA A LA FUNCIÓN DE CONTACTOS QUE CREAMOS ---
+            registrar_contacto_si_no_existe(conn_tenant, user_phone, user_name, tenant_slug)
+            conn_tenant.commit() # Importante para que se guarde el contacto antes de seguir
+
             print(f"\n📩 MENSAJE: {user_text} ({tenant_slug})")
 
             historial_previo = obtener_historial(conn_tenant, user_phone)
