@@ -34,26 +34,50 @@ def guardar_respuesta(conn, record_id, respuesta_ia):
 
 def registrar_contacto_si_no_existe(conn, user_phone, user_name, tenant_slug):
     """
-    Verifica si el número ya existe en la tabla contactos.
-    Si no existe, lo crea. Si existe, actualiza la última interacción.
+    Registra contactos nuevos o actualiza existentes.
+    Calcula si pasaron más de 24 horas para marcar una nueva conversación.
     """
     cur = conn.cursor(dictionary=True)
     
-    # Buscamos si ya existe el número
-    cur.execute("SELECT id FROM contactos WHERE numero_telefono = %s", (user_phone,))
+    # 1. Buscamos al contacto
+    cur.execute("SELECT id, fecha_actualizacion, conversaciones FROM contactos WHERE numero_telefono = %s", (user_phone,))
     contacto = cur.fetchone()
     
     if not contacto:
-        # Si NO existe, lo insertamos
+        # ES NUEVO: Insertamos con created_at (el DB lo suele poner solo, pero lo aseguramos)
         print(f"👤 REGISTRANDO NUEVO CONTACTO: {user_phone}")
         sql = """INSERT INTO contactos 
-                 (nombre, numero_telefono, plataforma, dominio, ia_activada, interes) 
-                 VALUES (%s, %s, 'WhatsApp', %s, 1, 'Frío')"""
+                 (nombre, numero_telefono, plataforma, dominio, ia_activada, interes, created_at, fecha_actualizacion, conversaciones) 
+                 VALUES (%s, %s, 'WhatsApp', %s, 1, 'Frío', NOW(), NOW(), 1)"""
         cur.execute(sql, (user_name, user_phone, tenant_slug))
     else:
-        # Si SI existe, solo actualizamos su última interacción (opcional)
-        sql = "UPDATE contactos SET ultima_interaccion_usuario = NOW() WHERE id = %s"
-        cur.execute(sql, (contacto['id'],))
+        # YA EXISTE: Calculamos el tiempo transcurrido
+        ultima_fecha = contacto['fecha_actualizacion']
+        conversaciones_actuales = contacto['conversaciones'] or 0
+        
+        # Si no hay fecha previa, le ponemos la de ahorita
+        if not ultima_fecha:
+            sql = "UPDATE contactos SET fecha_actualizacion = NOW(), conversaciones = 1 WHERE id = %s"
+            cur.execute(sql, (contacto['id'],))
+        else:
+            # Comparamos: ¿Han pasado más de 24 horas?
+            sql_tiempo = "SELECT TIMESTAMPDIFF(HOUR, %s, NOW()) as horas"
+            cur.execute(sql_tiempo, (ultima_fecha,))
+            diff = cur.fetchone()
+            
+            if diff['horas'] >= 24:
+                # NUEVA CONVERSACIÓN (Pasaron +24hrs)
+                print(f"⏰ RE-CONTACTO (+24hrs): {user_phone}. Incrementando contador.")
+                sql = """UPDATE contactos SET 
+                         fecha_actualizacion = NOW(), 
+                         conversaciones = %s,
+                         timestamp = NOW() 
+                         WHERE id = %s"""
+                cur.execute(sql, (conversaciones_actuales + 1, contacto['id']))
+            else:
+                # MISMA CONVERSACIÓN (Sigue dentro de las 24hrs)
+                sql = "UPDATE contactos SET fecha_actualizacion = NOW() WHERE id = %s"
+                cur.execute(sql, (contacto['id'],))
     
     cur.close()
 # --- DEFINICIÓN DE HERRAMIENTAS PARA LA IA ---
