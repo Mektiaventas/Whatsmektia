@@ -1,100 +1,105 @@
 import mysql.connector
-import logging
 import re
+import unicodedata
+import logging
 
 logger = logging.getLogger(__name__)
 
+# --- TUS FUNCIONES DE APOYO (RESCATADAS) ---
+def normalizar_texto_busqueda(texto):
+    if not texto: return ""
+    texto = texto.lower()
+    texto = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
+    texto = re.sub(r'[^a-z0-9\s\-]', ' ', texto)
+    return ' '.join(texto.split()).strip()
+
+def extraer_palabras_clave_inteligente(texto):
+    texto_norm = normalizar_texto_busqueda(texto)
+    stopwords = {
+        'me', 'puedes', 'pueden', 'puede', 'podria', 'podrias', 'quiero', 'quiere', 'quisiera', 
+        'necesito', 'necesita', 'busco', 'buscas', 'busca', 'recomendar', 'recomiendan',
+        'mostrar', 'muestra', 'ver', 'tengo', 'tiene', 'hay', 'tienes', 'tenemos', 'favor', 
+        'gracias', 'por', 'para', 'con', 'sin', 'de', 'del', 'en', 'un', 'una', 'el', 'la', 
+        'mandas', 'manda', 'envia', 'envias', 'imagen', 'foto', 'precio', 'costo', 'cuanto'
+    }
+    palabras = texto_norm.split()
+    return [p for p in palabras if any(c.isdigit() for c in p) or (p not in stopwords and len(p) > 2)]
+
+# --- LA FUNCIÓN PRINCIPAL QUE LLAMA LA IA ---
 def buscar_productos(conn, query_texto):
-    """
-    MASTER FUNCTION V2: Motor de búsqueda unificado con ponderación multicapa.
-    Centraliza SKU, Categorías, Modelos y Descripción.
-    """
     try:
-        q = query_texto.strip().lower()
-        if not q:
-            return "Por favor, escribe el nombre o SKU del producto."
-
-        print(f"🚀 MASTER SEARCH: '{q}'")
-        cur = conn.cursor(dictionary=True)
-
-        # 1. Limpieza y Tokenización (Palabras clave)
-        # Filtramos palabras comunes que ensucian la búsqueda
-        stop_words = {'un', 'una', 'el', 'la', 'de', 'con', 'para', 'quiero', 'comprar', 'venden', 'tienen'}
-        palabras = [p for p in q.split() if p not in stop_words and len(p) > 1]
+        print(f"🚀 INICIANDO MASTER SEARCH V2: '{query_texto}'")
         
-        if not palabras:
-            palabras = [q] # Fallback al texto completo
+        # 1. ANALISIS INICIAL
+        palabras_clave = extraer_palabras_clave_inteligente(query_texto)
+        if not palabras_clave:
+            return "No detecté términos de búsqueda claros. ¿Qué equipo buscas?"
 
-        # 2. Construcción de Ponderación (Scoring)
-        # Esta lógica da puntos extra si el término aparece en lugares clave
+        cur = conn.cursor(dictionary=True)
+        
+        # 2. PRIORIDAD 1: BÚSQUEDA POR SKU EXACTO
+        # (Si el usuario pega un código, no queremos que la IA divague)
+        cur.execute("SELECT * FROM precios WHERE UPPER(sku) = %s LIMIT 1", (query_texto.strip().upper(),))
+        exacto = cur.fetchone()
+        if exacto:
+            cur.close()
+            return str([exacto])
+
+        # 3. PRIORIDAD 2: BÚSQUEDA MULTICAPA CON PONDERACIÓN (TU MAGIA)
         relevancia_parts = []
         where_parts = []
         params = []
 
-        # PESOS DE PUNTUACIÓN
-        # SKU Exacto: 500 pts | Modelo Exacto: 300 pts | SKU parcial: 100 pts | Desc parcial: 50 pts
-        for p in palabras:
-            term_like = f"%{p}%"
+        for idx, palabra in enumerate(palabras_clave):
+            p_like = f"%{palabra}%"
+            peso = 100 - (idx * 10) # La primera palabra es la más importante
             
             relevancia_parts.append(f"""
                 CASE 
-                    WHEN LOWER(sku) = %s THEN 500
-                    WHEN LOWER(modelo) = %s THEN 300
-                    WHEN LOWER(categoria) LIKE %s THEN 150
-                    WHEN LOWER(sku) LIKE %s THEN 100
-                    WHEN LOWER(modelo) LIKE %s THEN 80
-                    WHEN LOWER(descripcion) LIKE %s THEN 50
+                    WHEN LOWER(sku) = %s THEN {peso + 100}
+                    WHEN LOWER(categoria) LIKE %s THEN {peso + 50}
+                    WHEN LOWER(subcategoria) LIKE %s THEN {peso + 40}
+                    WHEN LOWER(modelo) LIKE %s THEN {peso + 30}
+                    WHEN LOWER(descripcion) LIKE %s THEN {peso}
                     ELSE 0 
                 END""")
             
-            where_parts.append("(sku LIKE %s OR modelo LIKE %s OR descripcion LIKE %s OR categoria LIKE %s)")
-            
-            # 6 parámetros para el CASE y 4 para el WHERE por cada palabra
-            params.extend([p, p, term_like, term_like, term_like, term_like])
+            where_parts.append("(categoria LIKE %s OR subcategoria LIKE %s OR modelo LIKE %s OR sku LIKE %s OR descripcion LIKE %s)")
+            # 5 params para el CASE, 5 para el WHERE
+            params.extend([palabra, p_like, p_like, p_like, p_like])
 
-        # Parámetros para la sección WHERE
-        params_where = []
-        for p in palabras:
-            term_like = f"%{p}%"
-            params_where.extend([term_like, term_like, term_like, term_like])
-
+        # Construir SQL Final
         sql = f"""
-            SELECT sku, descripcion, precio_menudeo, moneda, imagen, modelo, categoria, subcategoria,
-            ({' + '.join(relevancia_parts)}) AS score
+            SELECT *, ({' + '.join(relevancia_parts)}) AS score
             FROM precios
             WHERE ({' AND '.join(where_parts)})
-            AND (status_ws IS NULL OR status_ws = 'activo' OR status_ws = ' ' OR status_ws = '1')
-            HAVING score > 0
+            AND (status_ws IS NULL OR status_ws IN ('activo', ' ', '1'))
             ORDER BY score DESC
-            LIMIT 12
+            LIMIT 15
         """
-
+        
+        # Duplicamos params (una tanda para el SELECT de score y otra para el WHERE)
+        params_where = []
+        for p in palabras_clave:
+            params_where.extend([f"%{p}%"] * 5)
+            
         cur.execute(sql, params + params_where)
         resultados = cur.fetchall()
 
-        # 3. Lógica de Decisión Post-Búsqueda
-        if not resultados:
-            cur.close()
-            return "No encontré resultados exactos. ¿Podrías darme más detalles o el SKU?"
-
-        # Filtro de Calidad (Umbral)
-        # Si el primer resultado es muy fuerte (ej. un SKU exacto), 
-        # no mostramos "basura" que tenga un score muy bajo.
-        max_score = resultados[0]['score']
-        # Umbral dinámico: Solo lo que se parezca al menos al 60% del mejor resultado
-        umbral = max_score * 0.6
-        final_list = [r for r in resultados if r['score'] >= umbral][:4]
+        # 4. FILTRO DE CALIDAD (UMBRAL 90% - PASO 6 DE TU V1)
+        if resultados:
+            max_score = resultados[0].get('score', 0)
+            umbral = max_score * 0.9
+            resultados = [r for r in resultados if r.get('score', 0) >= umbral]
+            resultados = resultados[:3] # Máximo 3 para WhatsApp
 
         cur.close()
-        print(f"✅ Búsqueda finalizada. Top score: {max_score}. Mostrando: {len(final_list)}")
 
-        # 4. Formatear para la IA
-        # Enviamos un string limpio para que la IA decida cómo responderle al humano
-        return str(final_list)
+        if not resultados:
+            return "No encontré productos con esos términos exactos."
+
+        return str(resultados)
 
     except Exception as e:
-        logger.error(f"❌ Error en Master Search: {e}")
-        return "Error interno al buscar en el catálogo."
-
-def derivar_a_asesor(motivo):
-    return f"SOLICITUD DE ASESOR HUMANO: {motivo}"
+        logger.error(f"🔴 Error Master Search: {e}")
+        return "[]"
