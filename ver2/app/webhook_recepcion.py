@@ -134,25 +134,33 @@ def recibir_mensajes():
                     elif nombre_f == "derivar_a_asesor":
                         resultado_f = derivar_a_asesor(args.get('motivo', 'No especificado'))
                     
-                    # Añadimos la respuesta de la herramienta al contexto
+                    # IMPORTANTE: Metemos la respuesta de la DB al historial de la IA
                     messages_ia.append(obj_respuesta)
                     messages_ia.append({
                         "role": "tool",
                         "tool_call_id": tool_call.id,
-                        "content": resultado_f
+                        "content": str(resultado_f) 
                     })
 
-                # Segunda llamada para que la IA redacte con los datos obtenidos
+                # Segunda llamada: Aquí la IA ya tiene los datos y redacta la respuesta final
                 segunda_res = client_ds.chat.completions.create(
                     model="deepseek-chat",
                     messages=messages_ia
                 )
                 respuesta_ia = segunda_res.choices[0].message.content
+
+                # Limpieza por si DeepSeek se pone "técnico"
+                if "<｜" in respuesta_ia:
+                    respuesta_ia = respuesta_ia.split(">")[-1].strip()
             else:
                 respuesta_ia = obj_respuesta.content
 
             # 5. Finalizar y Enviar
-            print(f"🤖 RESPUESTA: {respuesta_ia}")
+            # Si la IA está "alucinando" con el historial viejo, le recordamos que sea breve
+            if len(respuesta_ia) > 1000:
+                respuesta_ia = respuesta_ia[:1000] + "..."
+
+            print(f"🤖 RESPUESTA FINAL: {respuesta_ia}")
             guardar_respuesta(conn_tenant, mensaje_id, respuesta_ia)
             conn_tenant.commit()
             conn_tenant.close()
