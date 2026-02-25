@@ -28,81 +28,79 @@ def extraer_palabras_clave_inteligente(texto):
 # --- LA FUNCIÓN PRINCIPAL QUE LLAMA LA IA ---
 def buscar_productos(conn, query_texto):
     try:
-        print(f"🚀 INICIANDO MASTER SEARCH V2: '{query_texto}'")
-        
-        # 1. ANALISIS INICIAL
-        palabras_clave = extraer_palabras_clave_inteligente(query_texto)
-        if not palabras_clave:
-            return "No detecté términos de búsqueda claros. ¿Qué equipo buscas?"
+        palabras = extraer_palabras_clave_inteligente(query_texto)
+        if not palabras: return "[]"
 
         cur = conn.cursor(dictionary=True)
         
-        # 2. PRIORIDAD 1: BÚSQUEDA POR SKU EXACTO
-        # (Si el usuario pega un código, no queremos que la IA divague)
-        cur.execute("SELECT * FROM precios WHERE UPPER(sku) = %s LIMIT 1", (query_texto.strip().upper(),))
-        exacto = cur.fetchone()
-        if exacto:
-            cur.close()
-            return str([exacto])
+        # 1. Obtener los nombres de las columnas dinámicamente
+        # Esto hace que funcione para cualquier cliente/tenant
+        cur.execute("SHOW COLUMNS FROM precios")
+        columnas = [col['Field'] for col in cur.fetchall()]
+        
+        # Columnas prohibidas o que pesan mucho y no sirven para la IA
+        columnas_ignorar = {'id', 'status_ws', 'creado_en', 'actualizado_en', 'id_tenant'}
+        columnas_busqueda = [c for c in columnas if c not in columnas_ignorar]
 
-        # 3. PRIORIDAD 2: BÚSQUEDA MULTICAPA CON PONDERACIÓN (TU MAGIA)
+        # 2. Construcción de Query Multicapa Dinámica
         relevancia_parts = []
         where_parts = []
         params = []
 
-        for idx, palabra in enumerate(palabras_clave):
+        for idx, palabra in enumerate(palabras):
             p_like = f"%{palabra}%"
-            peso = 100 - (idx * 10) # La primera palabra es la más importante
+            peso = 100 - (idx * 10)
             
-            relevancia_parts.append(f"""
-                CASE 
-                    WHEN LOWER(sku) = %s THEN {peso + 100}
-                    WHEN LOWER(categoria) LIKE %s THEN {peso + 50}
-                    WHEN LOWER(subcategoria) LIKE %s THEN {peso + 40}
-                    WHEN LOWER(modelo) LIKE %s THEN {peso + 30}
-                    WHEN LOWER(descripcion) LIKE %s THEN {peso}
-                    ELSE 0 
-                END""")
+            # Ponderación dinámica sobre todas las columnas
+            case_parts = []
+            for col in columnas_busqueda:
+                # Prioridad mayor a SKU y Modelo si existen
+                bono = 50 if col.lower() in ['sku', 'modelo', 'codigo'] else 0
+                case_parts.append(f"WHEN LOWER({col}) LIKE %s THEN {peso + bono}")
+                params.append(p_like)
             
-            where_parts.append("(categoria LIKE %s OR subcategoria LIKE %s OR modelo LIKE %s OR sku LIKE %s OR descripcion LIKE %s)")
-            # 5 params para el CASE, 5 para el WHERE
-            params.extend([palabra, p_like, p_like, p_like, p_like])
+            relevancia_parts.append(f"CASE {' '.join(case_parts)} ELSE 0 END")
+            
+            # Filtro WHERE dinámico
+            where_parts.append(f"({' OR '.join([f'LOWER({c}) LIKE %s' for c in columnas_busqueda])})")
+            params.extend([p_like] * len(columnas_busqueda))
 
-        # Construir SQL Final
         sql = f"""
             SELECT *, ({' + '.join(relevancia_parts)}) AS score
             FROM precios
             WHERE ({' AND '.join(where_parts)})
             AND (status_ws IS NULL OR status_ws IN ('activo', ' ', '1'))
             ORDER BY score DESC
-            LIMIT 15
+            LIMIT 10
         """
-        
-        # Duplicamos params (una tanda para el SELECT de score y otra para el WHERE)
-        params_where = []
-        for p in palabras_clave:
-            params_where.extend([f"%{p}%"] * 5)
-            
-        cur.execute(sql, params + params_where)
+
+        cur.execute(sql, params)
         resultados = cur.fetchall()
 
-        # 4. FILTRO DE CALIDAD (UMBRAL 90% - PASO 6 DE TU V1)
-        if resultados:
-            max_score = resultados[0].get('score', 0)
-            umbral = max_score * 0.9
-            resultados = [r for r in resultados if r.get('score', 0) >= umbral]
-            resultados = resultados[:3] # Máximo 3 para WhatsApp
+        # 3. COMPRESIÓN DE DATOS (Para que la IA no se cuelgue)
+        # Solo enviamos campos que tengan valor y limitamos texto largo
+        resultados_limpios = []
+        for res in resultados:
+            item = {}
+            for k, v in res.items():
+                if v and k not in columnas_ignorar and k != 'score':
+                    # Si el valor es un texto muy largo, lo recortamos para la IA
+                    val_str = str(v)
+                    item[k] = val_str[:100] + "..." if len(val_str) > 120 else v
+            resultados_limpios.append(item)
 
         cur.close()
+        
+        if not resultados_limpios:
+            return "No se encontraron coincidencias exactas."
 
-        if not resultados:
-            return "No encontré productos con esos términos exactos."
-
-        return str(resultados)
+        print(f"✅ Búsqueda exitosa. Enviando {len(resultados_limpios)} productos a la IA.")
+        return str(resultados_limpios)
 
     except Exception as e:
-        logger.error(f"🔴 Error Master Search: {e}")
+        print(f"❌ Error en búsqueda dinámica: {e}")
         return "[]"
+        
 def derivar_a_asesor(conn, motivo=None):
     """
     Función para que la IA transfiera el control a un humano.
