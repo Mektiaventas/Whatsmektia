@@ -103,3 +103,30 @@ def buscar_productos(conn, query_texto):
     except Exception as e:
         logger.error(f"🔴 Error Master Search: {e}")
         return "[]"
+def derivar_a_asesor(conn, motivo=None):
+    """
+    Función para que la IA transfiera el control a un humano.
+    Busca los asesores disponibles en la tabla de configuración.
+    """
+    try:
+        cur = conn.cursor(dictionary=True)
+        # Obtenemos los datos de los asesores de la configuración
+        cur.execute("SELECT asesor1_nombre, asesor1_telefono, asesor2_nombre, asesor2_telefono FROM configuracion LIMIT 1")
+        config = cur.fetchone()
+        cur.close()
+
+        if config:
+            msg = (
+                f"Entiendo. He solicitado el apoyo de un asesor técnico.\n\n"
+                f"👨‍💻 *{config['asesor1_nombre']}* ({config['asesor1_telefono']}) o "
+                f"👩‍💻 *{config['asesor2_nombre']}* ({config['asesor2_telefono']}) "
+                f"se pondrán en contacto contigo a la brevedad."
+            )
+            # Aquí podrías agregar lógica para marcar la conversación como 'atendida_por_humano' en la DB
+            return msg
+        
+        return "He notificado a mis compañeros humanos, pronto te atenderán."
+
+    except Exception as e:
+        logger.error(f"❌ Error al derivar a asesor: {e}")
+        return "Hubo un problema al contactar al asesor, pero ya he dejado el aviso."
