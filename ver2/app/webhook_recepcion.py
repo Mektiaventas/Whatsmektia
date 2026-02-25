@@ -32,6 +32,30 @@ def guardar_respuesta(conn, record_id, respuesta_ia):
     cur.execute("UPDATE conversaciones SET respuesta = %s, respuesta_tipo_mensaje = 'texto' WHERE id = %s", (respuesta_ia, record_id))
     cur.close()
 
+def registrar_contacto_si_no_existe(conn, user_phone, user_name, tenant_slug):
+    """
+    Verifica si el número ya existe en la tabla contactos.
+    Si no existe, lo crea. Si existe, actualiza la última interacción.
+    """
+    cur = conn.cursor(dictionary=True)
+    
+    # Buscamos si ya existe el número
+    cur.execute("SELECT id FROM contactos WHERE numero_telefono = %s", (user_phone,))
+    contacto = cur.fetchone()
+    
+    if not contacto:
+        # Si NO existe, lo insertamos
+        print(f"👤 REGISTRANDO NUEVO CONTACTO: {user_phone}")
+        sql = """INSERT INTO contactos 
+                 (nombre, numero_telefono, plataforma, dominio, ia_activada, interes) 
+                 VALUES (%s, %s, 'WhatsApp', %s, 1, 'Frío')"""
+        cur.execute(sql, (user_name, user_phone, tenant_slug))
+    else:
+        # Si SI existe, solo actualizamos su última interacción (opcional)
+        sql = "UPDATE contactos SET ultima_interaccion_usuario = NOW() WHERE id = %s"
+        cur.execute(sql, (contacto['id'],))
+    
+    cur.close()
 # --- DEFINICIÓN DE HERRAMIENTAS PARA LA IA ---
 TOOLS = [
     {
