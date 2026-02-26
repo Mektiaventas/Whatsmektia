@@ -66,7 +66,7 @@ def buscar_productos(conn, query_texto):
             FROM precios
             WHERE ({' OR '.join(where_parts)})
             AND (status_ws IS NULL OR status_ws IN ('activo', ' ', '1'))
-            ORDER BY score DESC
+            ORDER BY score DESC, CHAR_LENGTH(descripcion) ASC
             LIMIT 5
         """
         cur.execute(sql, params)
