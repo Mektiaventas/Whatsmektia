@@ -83,10 +83,11 @@ def buscar_productos(conn, query_texto):
             resultados_limpios.append(item)
 
         cur.close()
-        
+
         if not resultados_limpios:
-            print("DEBUG: Cero resultados encontrados.")
-            return "No se encontraron coincidencias exactas."
+            print("DEBUG: Cero resultados. Enviando respuesta amigable formateada.")
+            # Le mandamos un objeto que la IA entienda como "No hay, pero ofrece ayuda"
+            return "[{'resultado': 'sin_existencias', 'aviso': 'No se encontraron calibradores de interiores de 150mm. Sugiere contactar a un asesor o preguntar por otro modelo.'}]"
 
         payload = str(resultados_limpios)
         print(f"✅ DEBUG: Búsqueda exitosa. Enviando {len(resultados_limpios)} productos. Tamaño: {len(payload)} chars")
