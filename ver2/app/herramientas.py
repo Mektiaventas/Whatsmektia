@@ -15,93 +15,85 @@ def normalizar_texto_busqueda(texto):
 
 def extraer_palabras_clave_inteligente(texto):
     texto_norm = normalizar_texto_busqueda(texto)
-    stopwords = {
-        'me', 'puedes', 'pueden', 'puede', 'podria', 'podrias', 'quiero', 'quiere', 'quisiera', 
-        'necesito', 'necesita', 'busco', 'buscas', 'busca', 'recomendar', 'recomiendan',
-        'mostrar', 'muestra', 'ver', 'tengo', 'tiene', 'hay', 'tienes', 'tenemos', 'favor', 
-        'gracias', 'por', 'para', 'con', 'sin', 'de', 'del', 'en', 'un', 'una', 'el', 'la', 
-        'mandas', 'manda', 'envia', 'envias', 'imagen', 'foto', 'precio', 'costo', 'cuanto'
-    }
+    stopwords = {'quiero', 'necesito', 'busco', 'favor', 'precio', 'costo', 'para', 'con', 'del', 'los', 'las'}
     palabras = texto_norm.split()
-    return [p for p in palabras if any(c.isdigit() for c in p) or (p not in stopwords and len(p) > 2)]
+    
+    palabras_procesadas = []
+    for p in palabras:
+        if p in stopwords or len(p) < 3:
+            continue
+            
+        # Lógica de Raíz (Stemming):
+        # Si termina en 'es' (interiores -> interior) o 's' (cursos -> curso)
+        # Quitamos la terminación para buscar la "raíz"
+        if len(p) > 4:
+            if p.endswith('es'):
+                p = p[:-2]
+            elif p.endswith('s'):
+                p = p[:-1]
+        
+        palabras_procesadas.append(p)
+        
+    return palabras_procesadas
 
 # --- LA FUNCIÓN PRINCIPAL QUE LLAMA LA IA ---
 def buscar_productos(conn, query_texto):
     try:
         print(f"\n🔍 DEBUG: Iniciando búsqueda para: '{query_texto}'")
+        # Aquí se usa la nueva función de "recortar palabras" (singular/plural)
         palabras = extraer_palabras_clave_inteligente(query_texto)
-        if not palabras: 
-            print("DEBUG: No se extrajeron palabras clave.")
-            return "[]"
+        if not palabras: return "[]"
 
         cur = conn.cursor(dictionary=True)
-        cur.execute("SHOW COLUMNS FROM precios")
-        columnas = [col['Field'] for col in cur.fetchall()]
         
-        columnas_ignorar = {'id', 'status_ws', 'creado_en', 'actualizado_en', 'id_tenant'}
-        columnas_busqueda = [c for c in columnas if c not in columnas_ignorar]
-
+        # Columnas donde buscaremos
+        columnas_busqueda = ['sku', 'categoria', 'descripcion', 'modelo', 'subcategoria']
+        
         relevancia_parts = []
-        where_parts = []
         params = []
 
         for idx, palabra in enumerate(palabras):
             p_like = f"%{palabra}%"
-            peso = 100 - (idx * 10)
+            # Prioridad a palabras clave técnicas
+            fuerza = 200 if palabra.lower() in ['interior', 'micrometro', 'calibrador'] else 50
+            
             case_parts = []
             for col in columnas_busqueda:
-                col_lower = col.lower()
-                bono = 0
-                # Prioridad máxima a SKU y Modelo
-                if col_lower in ['sku', 'modelo', 'codigo']:
-                    bono = 100
-                # Prioridad alta a la categoría (aquí es donde dice 'Micrómetro de Interior')
-                elif col_lower in ['categoria', 'subcategoria', 'linea']:
-                    bono = 70
-                # Prioridad media a la descripción
-                elif col_lower in ['descripcion']:
-                    bono = 40
-                
-                case_parts.append(f"WHEN LOWER({col}) LIKE %s THEN {peso + bono}")
+                bono = 100 if col in ['sku', 'categoria'] else 20
+                case_parts.append(f"WHEN LOWER({col}) LIKE %s THEN {fuerza + bono}")
                 params.append(p_like)
             
             relevancia_parts.append(f"CASE {' '.join(case_parts)} ELSE 0 END")
-            where_parts.append(f"({' OR '.join([f'LOWER({c}) LIKE %s' for c in columnas_busqueda])})")
-            params.extend([p_like] * len(columnas_busqueda))
 
-        # CAMBIO: Bajamos LIMIT a 5 para evitar que la IA se atore
-        # CAMBIO: Usamos OR en lugar de AND para no ser estrictos
-        # Y ordenamos por el score que ya calculamos arriba
+        # SQL con OR y el Stemming (palabras recortadas) hará que encuentre "interior" aunque busquen "interiores"
         sql = f"""
-            SELECT *, ({' + '.join(relevancia_parts)}) AS score
+            SELECT sku, descripcion, categoria, precio_menudeo, moneda, ({' + '.join(relevancia_parts)}) AS score
             FROM precios
-            WHERE ({' OR '.join(where_parts)})
-            AND (status_ws IS NULL OR status_ws IN ('activo', ' ', '1'))
-            ORDER BY score DESC, CHAR_LENGTH(descripcion) ASC
+            WHERE (status_ws IS NULL OR status_ws IN ('activo', ' ', '1'))
+            HAVING score > 0
+            ORDER BY score DESC
             LIMIT 5
         """
+
         cur.execute(sql, params)
         resultados = cur.fetchall()
-
-        resultados_limpios = []
-        for res in resultados:
-            item = {}
-            for k, v in res.items():
-                if v and k not in columnas_ignorar and k != 'score':
-                    val_str = str(v)
-                    # Recortamos a 80 caracteres para que el JSON sea ligero
-                    item[k] = val_str[:80] + "..." if len(val_str) > 85 else v
-            resultados_limpios.append(item)
-
         cur.close()
 
-        if not resultados_limpios:
-            print("DEBUG: Cero resultados. Enviando respuesta amigable formateada.")
-            # Le mandamos un objeto que la IA entienda como "No hay, pero ofrece ayuda"
-            return "[{'resultado': 'sin_existencias', 'aviso': 'No se encontraron calibradores de interiores de 150mm. Sugiere contactar a un asesor o preguntar por otro modelo.'}]"
+        if not resultados:
+            print("DEBUG: Cero resultados encontrados.")
+            return "No hay existencias exactas. Sugiere hablar con un asesor."
 
-        payload = str(resultados_limpios)
-        print(f"✅ DEBUG: Búsqueda exitosa. Enviando {len(resultados_limpios)} productos. Tamaño: {len(payload)} chars")
+        # --- AQUÍ ESTÁ EL CAMBIO DE LIMPIEZA PARA QUE LA IA NO SE MAREE ---
+        resultados_cortos = []
+        for r in resultados:
+            resultados_cortos.append({
+                "SKU": r['sku'],
+                "Producto": r['descripcion'][:100] if r['descripcion'] else "Sin descripción",
+                "Precio": f"{r['precio_menudeo']} {r['moneda']}"
+            })
+        
+        payload = str(resultados_cortos)
+        print(f"✅ DEBUG: Búsqueda exitosa. Enviando {len(resultados_cortos)} productos.")
         return payload
 
     except Exception as e:
