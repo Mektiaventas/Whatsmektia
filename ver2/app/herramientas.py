@@ -50,7 +50,18 @@ def buscar_productos(conn, query_texto):
             peso = 100 - (idx * 10)
             case_parts = []
             for col in columnas_busqueda:
-                bono = 50 if col.lower() in ['sku', 'modelo', 'codigo'] else 0
+                col_lower = col.lower()
+                bono = 0
+                # Prioridad máxima a SKU y Modelo
+                if col_lower in ['sku', 'modelo', 'codigo']:
+                    bono = 100
+                # Prioridad alta a la categoría (aquí es donde dice 'Micrómetro de Interior')
+                elif col_lower in ['categoria', 'subcategoria', 'linea']:
+                    bono = 70
+                # Prioridad media a la descripción
+                elif col_lower in ['descripcion']:
+                    bono = 40
+                
                 case_parts.append(f"WHEN LOWER({col}) LIKE %s THEN {peso + bono}")
                 params.append(p_like)
             
