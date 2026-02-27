@@ -8277,7 +8277,7 @@ def webhook():
 
         change = entry['changes'][0]['value']
 
-        # 2. Ignorar actualizaciones de estado (sent, delivered, read)
+        # 2. Ignorar actualizaciones de estado
         if 'statuses' in change:
             return 'OK', 200
 
@@ -8286,15 +8286,14 @@ def webhook():
             app.logger.info("⚠️ Webhook: no messages in payload")
             return 'OK', 200
 
-        # 3. IDENTIFICACIÓN DINÁMICA DEL TENANT (Configuración Completa)
-        # Usamos el Host para garantizar que cargamos la personalidad (IA, Negocio, que_hace)
+        # 3. IDENTIFICACIÓN DINÁMICA DEL TENANT
         config = obtener_configuracion_por_host()
         
         metadata = change.get('metadata', {})
         phone_number_id = metadata.get('phone_number_id')
         app.logger.info(f"📞 Webhook recibido para Phone ID: {phone_number_id} | Host: {request.host}")
 
-        # 4. Extraer nombre del contacto del perfil de WhatsApp
+        # 4. Extraer nombre del contacto
         nombre_whatsapp = None
         try:
             if 'contacts' in change:
@@ -8311,19 +8310,15 @@ def webhook():
             app.logger.error("🔴 Webhook: message without 'from'")
             return 'OK', 200
 
-        # 6. Inicialización de metadatos de chat y contacto
+        # 6. Inicialización de metadatos
         try:
             inicializar_chat_meta(numero, config)
             actualizar_info_contacto(numero, config, nombre_perfil=nombre_whatsapp) 
         except Exception as e:
             app.logger.warning(f"⚠️ pre-processing kanban/contact failed: {e}")
 
-        # 7. Deduplicación de mensajes por ID (Evita procesar 2 veces lo mismo)
+        # 7. Deduplicación
         message_id = msg.get('id')
-        if not message_id:
-            app.logger.error("🔴 Webhook: message without id, cannot dedupe reliably")
-            return 'OK', 200
-        
         import hashlib
         message_hash = hashlib.md5(f"{numero}_{message_id}".encode()).hexdigest()
         
@@ -8333,19 +8328,16 @@ def webhook():
         
         processed_messages[message_hash] = time.time()
         
-        # Limpieza de caché de duplicados (mensajes de más de 1 hora)
+        # Limpieza de caché de duplicados
         now_ts = time.time()
         for h, ts in list(processed_messages.items()):
             if now_ts - ts > 3600:
                 del processed_messages[h]
 
-        # 8. Procesamiento de contenido (Texto, Imagen, Audio, Documento)
+        # 8. Procesamiento de contenido
         texto = ''
         es_imagen = es_audio = es_archivo = False
-        imagen_base64 = None
-        public_url = None
-        transcripcion = None
-        audio_url = None
+        imagen_base64 = public_url = transcripcion = audio_url = None
 
         if 'text' in msg and 'body' in msg['text']:
             texto = (msg['text']['body'] or '').strip()
@@ -8376,15 +8368,24 @@ def webhook():
         else:
             texto = f"[{msg.get('type', 'unknown')}] Mensaje no textual"
 
-        app.logger.info(f"📝 Incoming {numero}: '{(texto or '')[:200]}' (imagen={es_imagen}, audio={es_audio}, archivo={es_archivo})")
-
         # 9. Registro de Nueva Conversación
         try:
             registrar_nueva_conversacion(numero, texto, config=config)
         except Exception as e:
             app.logger.error(f"❌ Error al registrar nueva conversación: {e}")
 
-        # 10. Guardar mensaje inmediatamente (Persistencia visual para CRM)
+        # --- AQUÍ ESTÁ EL CAMBIO CLAVE ---
+        # 10. EXTRAER HISTORIAL FINAL (Única vez)
+        # Lo extraemos después de registrar la nueva para que incluya el mensaje actual si es necesario
+        historial_final = []
+        try:
+            from services import obtener_historial
+            historial_final = obtener_historial(numero, limite=10, config=config)
+        except Exception as e:
+            app.logger.error(f"❌ Error crítico obteniendo historial_final: {e}")
+        # --------------------------------
+
+        # 11. Guardar mensaje inmediatamente
         try:
             if es_audio:
                 guardar_mensaje_inmediato(
@@ -8403,8 +8404,8 @@ def webhook():
         except Exception as e:
             app.logger.warning(f"⚠️ Error en guardar_mensaje_inmediato: {e}")
 
-        # 11. Delegar a la lógica de negocio y respuesta de IA
-        # incoming_saved=True indica que ya guardamos el mensaje del usuario arriba
+        # 12. Delegar con el historial ya cargado
+        # Añadimos historial_final a los argumentos
         processed_ok = procesar_mensaje_unificado(
             msg=msg,
             numero=numero,
@@ -8415,14 +8416,14 @@ def webhook():
             imagen_base64=imagen_base64,
             public_url=public_url,
             transcripcion=transcripcion,
-            incoming_saved=True
+            incoming_saved=True,
+            historial_final=historial_final  # <--- Inyectamos la variable aquí
         )
 
         if processed_ok:
             app.logger.info(f"✅ procesar_mensaje_unificado completado para {numero}")
             return 'OK', 200
 
-        app.logger.info(f"⚠️ procesar_mensaje_unificado devolvió False para {numero}; ya persistido.")
         return 'OK', 200
 
     except Exception as e:
