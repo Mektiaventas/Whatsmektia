@@ -48,8 +48,7 @@ from difflib import SequenceMatcher
 from whatsapp import enviar_mensaje, obtener_imagen_whatsapp  # <--- AQUÍ
 from flask import request
 from flask import request, jsonify, render_template
-from services import get_cliente_by_subdomain # Importamos la función que centraliza todo
-from services import get_db_connection, get_cliente_by_subdomain
+from services import get_db_connection, get_cliente_by_subdomain, obtener_historial
 from bot_logic.leads import start_followup_scheduler
 MASTER_COLUMNS = [
     'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
@@ -6020,7 +6019,7 @@ def obtener_historial(numero, limite=5, config=None):
         
         # Invertir el orden para tener cronológico
         historial.reverse()
-        
+        print("DEBUG: Usando historial VIEJO de APP")
         app.logger.info(f"📚 Historial obtenido para {numero}: {len(historial)} mensajes")
         return historial
         
@@ -9446,7 +9445,7 @@ def notificar_asesor_asignado(asesor, numero_cliente, config=None):
 
 # ----------------- Generar Respuesta de Deepseek con TTS y Variables Sincronizadas -----------------
 # ----------------- Generar Respuesta de Deepseek FULL (Protegida) -----------------
-def generar_respuesta_deepseek(numero, texto, precios, historial, config, incoming_saved=False, es_audio=False, es_imagen=False, imagen_base64=None, transcripcion=None, catalog_list=None, texto_catalogo=None, producto_aplica="NO_APLICA"):
+def generar_respuesta_deepseek(numero, texto, precios, historial_compartido, config, incoming_saved=False, es_audio=False, es_imagen=False, imagen_base64=None, transcripcion=None, catalog_list=None, texto_catalogo=None, producto_aplica="NO_APLICA"):
     try:
         # 1. IMPORTS
         import os, json, requests, time
@@ -9610,6 +9609,10 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         app.logger.info(f"ℹ️ IA desactivada para {numero}, omitiendo procesamiento.")
         return True # Retornamos True para que el webhook no reintente
 
+    # 1.5. --- CARGA ÚNICA DE HISTORIAL (ESTA ES LA LÍNEA NUEVA) ---
+    # La ponemos aquí arriba para que 'historial_compartido' esté disponible para todos
+    historial_final = obtener_historial(numero, limite=6, config=config)
+    
     # 2. --- VÍA RÁPIDA DE CONTACTO (INTERCEPCIÓN TEMPRANA) ---
     # Normalizamos el texto aquí para usarlo en todo el proceso
     texto_norm = (texto or "").strip().lower()
@@ -9733,7 +9736,8 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         # ================================================================
         # Llamamos a la función de fichas. 
         # Esta función internamente decidirá si manda texto simple o ficha con imagen.
-        if fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
+        if fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_inyectado=historial_final)):
+            app.logger.info(f"✅ Fichas enviadas, cerramos flujo para {numero}")
             return True
         # ================================================================
         # FIN DEL BLOQUE - IA TOTAL
@@ -9905,6 +9909,7 @@ EJEMPLOS:
         # --- User content (SIN CAMBIOS) ---
         user_content = {
             "mensaje_actual": texto or "",
+            "historial_reciente": historial_final, # <--- USAMOS LA MISMA
             "es_imagen": bool(es_imagen),
             "es_audio": bool(es_audio),
             "transcripcion": transcripcion or "",
@@ -10028,7 +10033,7 @@ EJEMPLOS:
                 return True
 
         if save_cita:
-            manejar_guardado_cita_unificado(save_cita, intent, numero, texto, historial, catalog_list, respuesta_text, incoming_saved, config)
+            manejar_guardado_cita_unificado(save_cita, intent, numero, texto, historial_final, catalog_list, respuesta_text, incoming_saved, config)
             return True
 
         # --- BLOQUE CATALOGO / PDF ---
