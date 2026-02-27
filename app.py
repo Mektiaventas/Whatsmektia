@@ -5996,37 +5996,6 @@ def obtener_precio(servicio_nombre: str, config):
         return Decimal(res[0]), res[1]
     return None
 
-def obtener_historial(numero, limite=5, config=None):
-    """Función compatible con la estructura actual de la base de datos"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor(dictionary=True)
-        
-        cursor.execute("""
-            SELECT mensaje, respuesta, timestamp 
-            FROM conversaciones 
-            WHERE numero = %s 
-            ORDER BY timestamp DESC 
-            LIMIT %s
-        """, (numero, limite))
-        
-        historial = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        
-        # Invertir el orden para tener cronológico
-        historial.reverse()
-        print("DEBUG: Usando historial VIEJO de APP")
-        app.logger.info(f"📚 Historial obtenido para {numero}: {len(historial)} mensajes")
-        return historial
-        
-    except Exception as e:
-        app.logger.error(f"❌ Error al obtener historial: {e}")
-        return []
-
 def buscar_sku_en_texto(texto, precios):
     """
     Busca un SKU presente en 'precios' dentro de 'texto'.
