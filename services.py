@@ -5,6 +5,7 @@ from mysql.connector import pooling
 from flask import request
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 _MYSQL_POOLS = {}
 
 def get_db_connection(config=None):
@@ -59,9 +60,11 @@ def get_cliente_by_subdomain(subdominio):
         return None
 # Dentro de services.py
 def obtener_historial(numero, limite=5, config=None):
+    print(f"🕵️ Intentando obtener historial para: {numero} en BD: {config.get('db_name') if config else 'None'}")
     # Si por algún error llegara sin config, lanzamos un error claro
     if config is None:
-        logger.error(f"❌ Error crítico: Se intentó buscar historial para {numero} sin configuración de BD.")
+        print(f"❌ Error crítico: Config es None para {numero}")
+        #logger.error(f"❌ Error crítico: Se intentó buscar historial para {numero} sin configuración de BD.")
         return []
     
     try:
