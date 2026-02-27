@@ -75,6 +75,8 @@ processed_messages = {}
 tz_mx = pytz.timezone('America/Mexico_City')
 guardado = True
 app = Flask(__name__)
+logging.basicConfig(level=logging.INFO) # Esto activa el logging para todos los archivos
+logging.getLogger('services').setLevel(logging.DEBUG) # Específicamente para tu archivo de base de datos
 app.secret_key = os.getenv("SECRET_KEY", "cualquier-cosa")
 app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 50 MB
 app.logger.setLevel(logging.INFO)
