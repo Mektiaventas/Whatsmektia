@@ -80,7 +80,7 @@ def obtener_historial(numero, limite=5, config=None):
         historial = cursor.fetchall()
         cursor.close()
         conn.close()
-        
+        print("DEBUG: Usando historial desde SERVICES")
         historial.reverse()
         return historial
     except Exception as e:
