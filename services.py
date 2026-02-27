@@ -65,7 +65,7 @@ def obtener_historial(numero, limite=5, config=None):
     # Si por algún error llegara sin config, lanzamos un error claro
     if config is None:
         print(f"❌ Error crítico: Config es None para {numero}")
-        logger.error(f"❌ Error crítico: Se intentó buscar historial para {numero} sin configuración de BD.")
+        #logger.error(f"❌ Error crítico: Se intentó buscar historial para {numero} sin configuración de BD.")
         return []
     
     try:
@@ -88,5 +88,6 @@ def obtener_historial(numero, limite=5, config=None):
         historial.reverse()
         return historial
     except Exception as e:
-        logger.error(f"❌ Error al obtener historial: {e}")
+        logging.error(f"❌ Error al obtener historial: {e}")
+        #logger.error(f"❌ Error al obtener historial: {e}")
         return []
