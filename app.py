@@ -6795,13 +6795,10 @@ def asignar_asesor_a_cliente(numero_cliente, asesor, config=None):
         app.logger.error(f"🔴 obtener_siguiente_asesor error: {e}")
         return None
 
-def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
+def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True, historial_inyectado=None):
     """
-    Envía al cliente SU ASESOR ASIGNADO PERSISTENTEMENTE. 
-    Si es la primera vez, asigna uno nuevo; si ya tiene, usa el mismo.
-    Retorna True si se envió.
-    También notifica al asesor seleccionado y registra la alerta 
-    en el historial del asesor para visibilidad en Kanban/Chats.
+    Versión OPTIMIZADA: Usa historial_inyectado para generar el resumen IA 
+    instantáneamente y notificar al asesor sin latencia de DB.
     """
     if config is None:
         config = obtener_configuracion_por_host()
@@ -6810,7 +6807,7 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
         _ensure_sistema_config_table(config)
         _ensure_asesor_id_column(config)
         
-        # Obtener el asesor (esta función ahora verifica asignaciones existentes)
+        # Obtener el asesor asignado
         asesor = obtener_siguiente_asesor(numero_cliente, config)
         if not asesor:
             app.logger.info("ℹ️ No hay asesores configurados para pasar contacto")
@@ -6819,182 +6816,101 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
         nombre = asesor.get('nombre') or 'Asesor'
         telefono = asesor.get('telefono') or ''
 
-        # --- INICIO LÓGICA DE MOVIMIENTO DE KANBAN ESPECÍFICO (Actualizado para Asesor 1 y Asesor 2) ---
-        
-        # Valor de fallback inicial
-        columna_destino_id = 3 # Columna estándar "Esperando Respuesta"
-        columna_buscada = None
-        
+        # --- LÓGICA DE MOVIMIENTO DE KANBAN (Simplificada) ---
+        columna_destino_id = 3 # Fallback: Esperando Respuesta
         try:
             cfg_full = load_config(config)
             asesores_list = cfg_full.get('asesores_list', [])
-            
-            # El teléfono del asesor asignado (limpiado de espacios)
             telefono_actual = telefono.strip() 
             
-            # Iterar sobre los primeros 2 asesores para verificar si se requiere columna específica
             for i in range(min(2, len(asesores_list))): 
                 asesor_n = i + 1
-                asesor_n_telefono = (asesores_list[i].get('telefono') or '').strip()
-
-                if telefono_actual == asesor_n_telefono:
+                if telefono_actual == (asesores_list[i].get('telefono') or '').strip():
                     columna_buscada = f"Asesor {asesor_n}"
-                    
-                    # Buscar el ID de la columna por nombre
                     col_id = obtener_id_columna_por_nombre(columna_buscada, config) 
-                    
                     if col_id:
-                        columna_destino_id = col_id # ¡Asignación a la columna específica!
-                        app.logger.info(f"📊 Asesor {nombre} detectado como '{columna_buscada}'. Moviendo cliente a columna {col_id}.")
-                        break # Salir del bucle una vez que se encuentra y asigna
-                    else:
-                        app.logger.warning(f"⚠️ Columna '{columna_buscada}' no encontrada en DB. Usando fallback ID 3.")
-                    
-        except IndexError:
-            app.logger.warning("⚠️ La lista de asesores está vacía o mal configurada.")
+                        columna_destino_id = col_id
+                        break 
         except Exception as e:
-            app.logger.error(f"🔴 Error en lógica de detección de Asesor para Kanban: {e}", exc_info=True)
+            app.logger.error(f"🔴 Error Kanban Asesor: {e}")
         
-        # --- FIN LÓGICA DE MOVIMIENTO DE KANBAN ESPECÍFICO ---
-
-        # --- LÓGICA DE ENVÍO MULTICANAL (Cliente) ---
+        # --- ENVÍO AL CLIENTE ---
         texto_cliente = f"👨‍💼 *{nombre}* es tu asesor asignado.\n\n📞 Teléfono: {telefono}\n\n¡Estará encantado de ayudarte! Puedes contactarlo directamente."
         
         if numero_cliente.startswith('tg_'):
             telegram_token = config.get('telegram_token')
-            if telegram_token:
-                chat_id = numero_cliente.replace('tg_', '')
-                enviado = send_telegram_message(chat_id, texto_cliente, telegram_token) 
-            else:
-                app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
-                enviado = False
+            chat_id = numero_cliente.replace('tg_', '')
+            enviado = send_telegram_message(chat_id, texto_cliente, telegram_token) if telegram_token else False
         else:
             enviado = enviar_mensaje(numero_cliente, texto_cliente, config)
-        # --- FIN LÓGICA DE ENVÍO MULTICANAL ---
 
         if enviado:
-            # Registrar el evento en la CONVERSACIÓN DEL CLIENTE
             guardar_conversacion(numero_cliente, f"Solicitud de asesor", texto_cliente, config)
-            app.logger.info(f"✅ Asesor {nombre} asignado persistentemente a {numero_cliente}")
-        else:
-            app.logger.warning(f"⚠️ No se pudo enviar el contacto del asesor a {numero_cliente}")
 
-
-        # 2. NOTIFICAR Y REGISTRAR ALERTA PARA EL ASESOR
+        # --- 2. NOTIFICAR AL ASESOR (USANDO HISTORIAL INYECTADO) ---
         if notificar_asesor and telefono:
             try:
-                # Obtener nombre mostrado del cliente
                 cliente_mostrado = obtener_nombre_mostrado_por_numero(numero_cliente, config) or numero_cliente
 
-                # Preparar historial para resumen
-                historial = obtener_historial(numero_cliente, limite=8, config=config) or []
+                # CAMBIO CLAVE: Usamos el historial que ya traemos en RAM
+                historial = historial_inyectado if historial_inyectado is not None else []
+                
+                # Si por alguna razón llegó vacío, solo en ese caso extremo consultamos
+                if not historial:
+                    historial = obtener_historial(numero_cliente, limite=8, config=config) or []
+
                 partes = []
                 for h in historial:
-                    if h.get('mensaje'):
-                        partes.append(f"Usuario: {h.get('mensaje')}")
-                    if h.get('respuesta'):
-                        partes.append(f"Asistente: {h.get('respuesta')}")
+                    if h.get('mensaje'): partes.append(f"U: {h.get('mensaje')}")
+                    if h.get('respuesta'): partes.append(f"A: {h.get('respuesta')}")
                 historial_text = "\n".join(partes) or "Sin historial previo."
 
-                # Preguntar a la IA por un resumen breve (1-3 líneas)
-                resumen = None
+                # Generar resumen con DeepSeek
+                resumen = "Solicitud de atención humana."
                 try:
-                    # Lógica de llamada a DeepSeek AI
-                    prompt = f"""
-Resume en 1-5 líneas en español, con lenguaje natural, el contexto principal de la conversación
-del cliente para que un asesor humano lo entienda rápidamente. Usa SOLO el historial a continuación.
-No incluyas números de teléfono ni direcciones.
-
-HISTORIAL:
-{historial_text}
-
-Devuelve únicamente el resumen breve (1-3 líneas).
-"""
+                    prompt = f"Resume en 3 líneas el interés del cliente:\n{historial_text}"
                     headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
                     payload = {
-                        "model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.2, "max_tokens": 200
+                        "model": "deepseek-chat", 
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.2, "max_tokens": 150
                     }
-                    r = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=10)
-                    r.raise_for_status()
-                    d = r.json()
-                    raw = d['choices'][0]['message']['content']
-                    if isinstance(raw, list):
-                        raw = " ".join([(it.get('text') if isinstance(it, dict) else str(it)) for it in raw])
-                    resumen = str(raw).strip()
-                    resumen = re.sub(r'\s*\n\s*', ' ', resumen)[:400]
-                except Exception as e:
-                    app.logger.warning(f"⚠️ No se pudo generar resumen IA para asesor: {e}")
-                    if historial:
-                        ultimo = historial[-1].get('mensaje') or ''
-                        resumen = (ultimo[:200] + '...') if len(ultimo) > 200 else ultimo
-                    else:
-                        resumen = "Sin historial disponible."
+                    r = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=7)
+                    if r.status_code == 200:
+                        resumen = r.json()['choices'][0]['message']['content'].strip()
+                except:
+                    pass
 
-                # Mensaje completo que se enviará al asesor
                 texto_asesor = (
-                    f"🔔 *NUEVA ASIGNACIÓN PERSISTENTE*\n\n"
-                    f"Se te ha asignado un nuevo cliente de forma permanente:\n"
+                    f"🔔 *NUEVA ASIGNACIÓN*\n\n"
                     f"📞 Cliente: {cliente_mostrado}\n"
-                    f"⏰ Hora: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
-                    f"🔎 *Resumen del chat:*\n{resumen}\n\n"
-                    f"🔗 *Link Directo:* https://wa.me/{numero_cliente.lstrip('+')}\n\n"
-                    f"¡Por favor, contacta al cliente pronto!"
+                    f"🔎 *Resumen:*\n{resumen}\n\n"
+                    f"🔗 *Chat:* https://wa.me/{numero_cliente.lstrip('+')}"
                 )
 
-                # Envío de la alerta por WhatsApp (si el asesor está en WhatsApp)
+                # Notificar al asesor
                 if not telefono.startswith('tg_'):
                     enviar_mensaje(telefono, texto_asesor, config)
-                app.logger.info(f"📤 Notificación enviada al asesor {telefono}")
                 
-                # --- INICIO: REGISTRO DE ALERTA EN EL HILO DEL ASESOR ---
-                
-                # 1. Asegurar contacto y meta del ASESOR (teléfono)
+                # Registrar alerta en el hilo del asesor para que lo vea en su CRM
                 inicializar_chat_meta(telefono, config)
-                actualizar_info_contacto(telefono, config)
-
-                # 2. Guardar la ALERTA como una RESPUESTA DEL SISTEMA (lado derecho).
                 guardar_respuesta_sistema(
                     telefono, 
-                    texto_asesor, # Se guarda en el campo 'respuesta'
+                    texto_asesor, 
                     config,
                     respuesta_tipo='alerta_interna', 
-                    respuesta_media_url=f"Cliente: {numero_cliente}, Resumen: {resumen}" 
+                    respuesta_media_url=f"Cliente: {numero_cliente}" 
                 )
 
-                app.logger.info(f"💾 Alerta registrada en el chat del asesor {telefono}")
-                # --- FIN: REGISTRO DE ALERTA EN EL HILO DEL ASESOR ---
-
-                # 3. Mover el chat del ASESOR (telefono) a columna específica (si aplica) o 'Asesores' (fallback).
-                try:
-                    if columna_destino_id != 3:
-                        # Si se asignó una columna específica (Asesor 1, Asesor 2, etc.), usar esa.
-                        col_asesor_final_id = columna_destino_id
-                        log_msg = f"columna específica {columna_destino_id} ({columna_buscada})."
-                    else:
-                        # Si se usó el fallback 3, buscar la columna genérica 'Asesores'.
-                        col_asesor_final_id = obtener_id_columna_asesores(config) # Asumo que esta función existe
-                        log_msg = f"columna genérica Asesores ({col_asesor_final_id})."
-                    
-                    if col_asesor_final_id:
-                        actualizar_columna_chat(telefono, col_asesor_final_id, config)
-                        app.logger.info(f"📊 Chat del asesor {telefono} movido a {log_msg}")
-                    else:
-                        app.logger.warning("⚠️ Columna 'Asesores' no encontrada y no se asignó columna específica. No se movió el chat del asesor.")
-                except Exception as e:
-                    app.logger.warning(f"⚠️ No se pudo mover el chat del asesor a la columna: {e}")
-                
             except Exception as e:
-                app.logger.warning(f"⚠️ No se pudo notificar/registrar al asesor {telefono}: {e}", exc_info=True)
+                app.logger.warning(f"⚠️ Error notificando asesor: {e}")
         
-        # 5. Mover el chat del CLIENTE (numero_cliente) a la columna determinada (columna_destino_id)
-        # Usa la columna específica si se detectó, o el fallback 3.
+        # Mover chats en el Kanban
         actualizar_columna_chat(numero_cliente, columna_destino_id, config)
-        app.logger.info(f"📊 Chat del cliente {numero_cliente} movido a columna {columna_destino_id}.")
-
+        
         return enviado
     except Exception as e:
-        app.logger.error(f"🔴 pasar_contacto_asesor error: {e}", exc_info=True)
+        app.logger.error(f"🔴 pasar_contacto_asesor error: {e}")
         return False
 
 # --- FUNCIONES ADICIONALES PARA KANBAN ---
