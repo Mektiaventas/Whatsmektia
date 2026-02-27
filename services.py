@@ -57,3 +57,32 @@ def get_cliente_by_subdomain(subdominio):
     except Exception as e:
         logger.error(f"⚠️ Error consultando tabla clientes.cliente: {e}")
         return None
+# Dentro de services.py
+def obtener_historial(numero, limite=5, config=None):
+    # Si por algún error llegara sin config, lanzamos un error claro
+    if config is None:
+        logger.error(f"❌ Error crítico: Se intentó buscar historial para {numero} sin configuración de BD.")
+        return []
+    
+    try:
+        # Aquí config['db_name'] ya trae 'unilova', 'mektia', etc.
+        conn = get_db_connection(config) 
+        cursor = conn.cursor(dictionary=True)
+        
+        cursor.execute("""
+            SELECT mensaje, respuesta, timestamp 
+            FROM conversaciones 
+            WHERE numero = %s 
+            ORDER BY timestamp DESC 
+            LIMIT %s
+        """, (numero, limite))
+        
+        historial = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        historial.reverse()
+        return historial
+    except Exception as e:
+        logger.error(f"❌ Error al obtener historial: {e}")
+        return []
