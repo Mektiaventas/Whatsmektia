@@ -2448,10 +2448,14 @@ def _ensure_chat_meta_followup_columns(config=None):
 
 # --- FIN NUEVAS FUNCIONES DE ASEGURAMIENTO PARA LEADS ---
 
-def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
-    """Detección inteligente de pedidos que interpreta contexto y datos faltantes"""
+def detectar_pedido_inteligente(mensaje, numero, historial_final=None, config=None):
+    """Detección inteligente de pedidos que interpreta contexto y datos faltantes usando el historial inyectado"""
     if config is None:
         config = obtener_configuracion_por_host()
+    
+    # Asegurar que el historial sea una lista para evitar errores de slice
+    if historial_final is None:
+        historial_final = []
     
     app.logger.info(f"🎯 Analizando mensaje para pedido inteligente: '{mensaje}'")
     
@@ -2463,16 +2467,13 @@ def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
         return False
     
     try:
-        # Obtener historial para contexto
-        if historial is None:
-            historial = obtener_historial(numero, limite=3, config=config)
-        
-        # Construir contexto del historial
+        # CONSTRUCCIÓN DEL CONTEXTO usando la variable global historial_final
+        # Ya no consultamos la base de datos aquí.
         contexto_historial = ""
-        for i, msg in enumerate(historial[-2:]):  # Últimos 2 mensajes
-            if msg['mensaje']:
+        for msg in historial_final[-2:]:  # Tomamos los últimos 2 mensajes del historial que ya extrajimos
+            if msg.get('mensaje'):
                 contexto_historial += f"Usuario: {msg['mensaje']}\n"
-            if msg['respuesta']:
+            if msg.get('respuesta'):
                 contexto_historial += f"Asistente: {msg['respuesta']}\n"
         
         # Prompt mejorado para detección inteligente
@@ -2506,21 +2507,6 @@ def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
         - Dirección de entrega
         - Forma de pago (efectivo, transferencia)
         - Nombre del cliente
-
-        Ejemplo si dice "quiero 2 gorditas":
-        {{
-            "es_pedido": true,
-            "confianza": 0.9,
-            "datos_obtenidos": {{
-                "platillos": ["gorditas"],
-                "cantidades": ["2"],
-                "especificaciones": [],
-                "nombre_cliente": null,
-                "direccion": null
-            }},
-            "datos_faltantes": ["guisados para las gorditas", "dirección"],
-            "siguiente_pregunta": "¡Perfecto! ¿De qué guisado quieres las gorditas? Tenemos chicharrón, tinga, papa, etc."
-        }}
         """
         
         headers = {
@@ -2556,7 +2542,7 @@ def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
         app.logger.error(f"Error en detección inteligente de pedido: {e}")
         # Fallback a detección básica
         return {"es_pedido": True, "confianza": 0.8, "datos_faltantes": ["todos"], "siguiente_pregunta": "¿Qué platillos deseas ordenar?"} if deteccion_basica else None
-
+        
 def manejar_pedido_automatico(numero, mensaje, analisis_pedido, config=None):
     """Maneja automáticamente el pedido detectado por la IA"""
     if config is None:
