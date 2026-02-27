@@ -10343,7 +10343,7 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
         generar_respuesta_deepseek(numero=numero, texto=texto, precios=precios, historial=obtener_historial(numero, limite=6, config=config), config=config, incoming_saved=incoming_saved, es_audio=es_audio)
         return True
 
-    # --- Si HAY productos para ficha, enviamos la "Chulada" ---
+    # --- BLOQUE UNIFICADO "LA CHULADA" ---
     for p in productos_para_ficha:
         img_url = p.get('imagen')
         sku_p = p.get('sku', '') or 'S/N'
@@ -10353,13 +10353,14 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
         lineas_p = []
         for llave, etiqueta in [('precio_menudeo', 'Menudeo'), ('precio_mayoreo', 'Mayoreo'), ('inscripcion', 'Inscripción'), ('mensualidad', 'Mensualidad'), ('precio', 'Precio')]:
             val = p.get(llave)
-            if val and str(val) != '0': lineas_p.append(f"💰 *{etiqueta}:* ${val}")
+            if val and str(val) not in ['0', '0.0', '0.00']: 
+                lineas_p.append(f"💰 *{etiqueta}:* ${val}")
         
         precios_wa = "\n".join(lineas_p) if lineas_p else "💰 *Precio:* Consultar"
         desc_wa = p.get('descripcion') or ''
-        if len(desc_wa) > 160: desc_wa = desc_wa[:157] + "..."
+        if len(desc_wa) > 250: desc_wa = desc_wa[:247] + "..." # Acortamos para que no sature
 
-        # EL CAPTION (El texto que va pegado a la imagen)
+        # EL CAPTION (Formato Chulada)
         ficha_wa = (
             f"🔹 *{titulo_p.upper()}*\n\n"
             f"{precios_wa}\n"
@@ -10368,13 +10369,14 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
         )
 
         if img_url:
-            # ENVIAR IMAGEN + TEXTO JUNTOS
             enviar_imagen(numero=numero, image_url=img_url, texto=ficha_wa, config=config)
-            # Guardar en el chat del dashboard
             actualizar_respuesta(numero, texto, f"Ficha enviada: {titulo_p}", config, respuesta_tipo='imagen', respuesta_media_url=img_url)
-            time.sleep(1)
+            time.sleep(1) # Evita spam
+        else:
+            # Si no hay imagen, al menos enviamos el texto
+            enviar_mensaje(numero, ficha_wa, config)
 
-    return True # Finaliza el proceso para que app.py no mande nada más.
+    return True # Aquí termina y evita que el orquestador principal gaste más tokens
     
 def guardar_respuesta_sistema(numero, respuesta, config=None, respuesta_tipo='alerta_interna', respuesta_media_url=None):
     if config is None:
