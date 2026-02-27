@@ -9551,13 +9551,16 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
 
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, public_url=None, transcripcion=None,
-                               incoming_saved=False, es_mi_numero=False, es_archivo=False):
+                               incoming_saved=False, es_mi_numero=False, es_archivo=False, 
+                               historial_final=None): # <--- Recibimos la variable del webhook
+    
     # AGREGA ESTA LÍNEA AQUÍ MISMO PARA SABER QUE ESTAMOS EN EL ARCHIVO CORRECTO
     print(f"DEBUG_TOTAL - Recibido: {texto} de {numero}") 
     # --- TEST DE CARGA DE CONFIGURACION ---
     print(f"🚨 TEST CONFIG: ia_nombre={config.get('ia_nombre')} | negocio={config.get('negocio_nombre')}")
     print(f"🚨 TEST DICCIONARIO: {list(config.keys())}")
     app.logger.info(f"DEBUG_TOTAL - Recibido: {texto}")
+    
     """
     Flujo unificado optimizado: Vía Rápida -> Kanban -> IA
     """ 
@@ -9567,23 +9570,21 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         app.logger.info(f"ℹ️ IA desactivada para {numero}, omitiendo procesamiento.")
         return True # Retornamos True para que el webhook no reintente
 
-    # 1.5. --- CARGA ÚNICA DE HISTORIAL (ESTA ES LA LÍNEA NUEVA) ---
-    # La ponemos aquí arriba para que 'historial_compartido' esté disponible para todos
-    print(f"DEBUG: Voy a llamar a obtener_historial para {numero}")
-    try:
-        historial_final = obtener_historial(numero, limite=6, config=config)
-        print(f"DEBUG: obtener_historial respondió con {len(historial_final)} registros")
-    except Exception as e:
-        print(f"DEBUG: EXPLOTÓ obtener_historial con el error: {e}")
+    # 1.5. --- CARGA ÚNICA DE HISTORIAL (YA INYECTADO) ---
+    # Si por alguna razón historial_final llega None, hacemos un fallback seguro,
+    # pero NO volvemos a llamar a obtener_historial si ya trae datos.
+    if historial_final is None:
+        print(f"DEBUG: historial_final llegó None, inicializando vacío para {numero}")
+        historial_final = []
+    else:
+        print(f"DEBUG: Usando historial_final inyectado con {len(historial_final)} registros")
     
     # 2. --- VÍA RÁPIDA DE CONTACTO (INTERCEPCIÓN TEMPRANA) ---
-    # Normalizamos el texto aquí para usarlo en todo el proceso
     texto_norm = (texto or "").strip().lower()
     
-    # Si el texto está vacío (a veces pasa en webhooks), intentamos sacarlo del objeto msg
     if not texto_norm and msg and 'text' in msg:
         texto_norm = msg['text'].get('body', "").strip().lower()
-    # Usamos Regex para detectar la raíz de las palabras (ignora comas, signos y variaciones)
+
     patron_contacto = r"(ubic|direcc|donde\s*(estan|se\s*encuentran|se\s*ubican|es))"
     if not es_imagen and not es_audio and re.search(patron_contacto, texto_norm):
         app.logger.info(f"🚀 [VIA RAPIDA] Solicitud de contacto detectada: {texto_norm}")
@@ -9592,22 +9593,22 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         negocio_data = cfg_full.get('negocio', {})
         respuesta_contacto = negocio_contact_block(negocio_data)
         
-        # Respuesta inmediata
         enviar_mensaje(numero, respuesta_contacto, config)
         registrar_respuesta_bot(numero, texto, respuesta_contacto, config, incoming_saved=incoming_saved)
         
-        return True # DETIENE LA EJECUCIÓN AQUÍ (No gasta tokens de IA ni procesa Kanban)
-    # 2.5 --- INTERCEPCIÓN POR ASESOR HUMANO (NUEVO) ---
-    # Si el usuario pide un humano o muestra frustración, cortamos el flujo de IA.
+        return True 
+
+    # 2.5 --- INTERCEPCIÓN POR ASESOR HUMANO ---
+    # Aquí pasamos el historial_final si la función lo requiere
     if detectar_intervencion_humana_ia(texto_norm, numero, config):
         app.logger.info(f"⚠️ [HUMANO] El usuario {numero} requiere atención de un asesor.")
-        # Esta función asigna al asesor (1 o 2), mueve el Kanban y manda el WhatsApp de alerta
-        exito_paso = pasar_contacto_asesor(numero, config=config)
+        exito_paso = pasar_contacto_asesor(numero, config=config, historial_inyectado=historial_final)
         if exito_paso:
             mensaje_confirmacion = "Entiendo. He solicitado que uno de nuestros asesores humanos tome el control de la conversación. Te contactarán por este medio a la brevedad. 👨‍💼"
             enviar_mensaje(numero, mensaje_confirmacion, config)
             registrar_respuesta_bot(numero, texto, mensaje_confirmacion, config, incoming_saved=incoming_saved)
-            return True # DETIENE TODO: No entra a la IA ni manda fichas.
+            return True 
+
     # 3. --- FLUJO NORMAL (KANBAN E IA) ---
     try:
         # Lógica de Kanban
@@ -9624,29 +9625,23 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         except Exception as e:
             app.logger.error(f"🔴 Fallo al mover chat (primera respuesta): {e}")
 
-        # Cargar configuración completa para el resto del proceso
         cfg_full = load_config(config) 
         
-        # --- A partir de aquí sigue tu lógica de Análisis de Imagen o DeepSeek ---
-        # (El código que ya tenías para gpt-4o o productos)
-        
-        # ... resto del código ..
-        # -----------------------------------------------
-        # --- INICIO: ANÁLISIS DE IMAGEN CON OPENAI (L7214) ---
+        # --- INICIO: ANÁLISIS DE IMAGEN CON OPENAI ---
         if es_imagen and imagen_base64:
             app.logger.info(f"🖼️ Detectada imagen, llamando a OpenAI (gpt-4o) para análisis...")
             try:
+                # Inyectamos historial_final aquí también para que la visión tenga contexto
                 respuesta_vision = analizar_imagen_y_responder(
                     numero=numero,
                     imagen_base64=imagen_base64,
                     caption=texto,
                     public_url=public_url,
-                    config=config
+                    config=config,
+                    historial_inyectado=historial_final
                 )
                 
                 if respuesta_vision:
-                    # 💥 CORRECCIÓN: Usar el envío unificado para Messenger/WA/TG
-                    # (La lógica de Telegram se maneja dentro del bloque 'else')
                     if numero.startswith('tg_'):
                         telegram_token = config.get('telegram_token')
                         if telegram_token:
@@ -9655,7 +9650,6 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                         else:
                             app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
                     else:
-                        # Esto ahora maneja 'fb_' y WhatsApp
                         enviar_mensaje(numero, respuesta_vision, config) 
 
                     registrar_respuesta_bot(numero, texto, respuesta_vision, config, imagen_url=public_url, es_imagen=True, incoming_saved=incoming_saved)
@@ -9664,16 +9658,12 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                     app.logger.warning("⚠️ OpenAI (gpt-4o) no devolvió respuesta para la imagen.")
                     fallback_msg = "Recibí tu imagen, pero no pude analizarla en este momento. ¿Podrías describirla?"
                     
-                    # 💥 CORRECCIÓN: Usar el envío unificado para Messenger/WA/TG
                     if numero.startswith('tg_'):
                         telegram_token = config.get('telegram_token')
                         if telegram_token:
                             chat_id = numero.replace('tg_', '')
                             send_telegram_message(chat_id, fallback_msg, telegram_token) 
-                        else:
-                            app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
                     else:
-                        # Esto ahora maneja 'fb_' y WhatsApp
                         enviar_mensaje(numero, fallback_msg, config) 
 
                     registrar_respuesta_bot(numero, texto, fallback_msg, config, imagen_url=public_url, es_imagen=True, incoming_saved=incoming_saved)
@@ -9683,12 +9673,10 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 app.logger.error(f"🔴 Error fatal llamando a analizar_imagen_y_responder: {e}")
                 app.logger.error(traceback.format_exc())
                 return False
-        # --- FIN ANÁLISIS DE IMAGEN ---
-        
-        # --- Preparar contexto y catálogo (SIN CAMBIOS) ---
-        historial = obtener_historial(numero, limite=6, config=config) or []
+
+        # --- PREPARAR CONTEXTO USANDO LA VARIABLE INYECTADA (BORRADA LA LLAMADA A BD) ---
         historial_text = ""
-        for h in historial:
+        for h in historial_final: # <--- Usamos historial_final directamente
             if h.get('mensaje'):
                 historial_text += f"Usuario: {h.get('mensaje')}\n"
             if h.get('respuesta'):
@@ -9697,13 +9685,10 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         # ================================================================
         # INICIO DEL BLOQUE - IA TOTAL CON FORMATO "FICHA DE PRODUCTO"
         # ================================================================
-        # Llamamos a la función de fichas. 
-        # Esta función internamente decidirá si manda texto simple o ficha con imagen.
+        # Inyectamos historial_final en fichas_ia_total
         if fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_final=historial_final):
             app.logger.info(f"✅ Fichas enviadas, cerramos flujo para {numero}")
             return True
-        # ================================================================
-        # FIN DEL BLOQUE - IA TOTAL
         # ================================================================
         
         texto_catalogo = build_texto_catalogo(precios, limit=40)
