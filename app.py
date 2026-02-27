@@ -9582,7 +9582,12 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
 
     # 1.5. --- CARGA ÚNICA DE HISTORIAL (ESTA ES LA LÍNEA NUEVA) ---
     # La ponemos aquí arriba para que 'historial_compartido' esté disponible para todos
-    historial_final = obtener_historial(numero, limite=6, config=config)
+    print(f"DEBUG: Voy a llamar a obtener_historial para {numero}")
+    try:
+        historial_final = obtener_historial(numero, limite=6, config=config)
+        print(f"DEBUG: obtener_historial respondió con {len(historial_final)} registros")
+    except Exception as e:
+        print(f"DEBUG: EXPLOTÓ obtener_historial con el error: {e}")
     
     # 2. --- VÍA RÁPIDA DE CONTACTO (INTERCEPCIÓN TEMPRANA) ---
     # Normalizamos el texto aquí para usarlo en todo el proceso
