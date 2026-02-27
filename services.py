@@ -61,15 +61,18 @@ def get_cliente_by_subdomain(subdominio):
 # Dentro de services.py
 def obtener_historial(numero, limite=5, config=None):
     logging.info(f"!!! LLAMADA DETECTADA A obtener_historial PARA {numero} !!!")
-    print(f"🕵️ Intentando obtener historial para: {numero} en BD: {config.get('db_name') if config else 'None'}")
-    # Si por algún error llegara sin config, lanzamos un error claro
-    if config is None:
-        print(f"❌ Error crítico: Config es None para {numero}")
-        #logger.error(f"❌ Error crítico: Se intentó buscar historial para {numero} sin configuración de BD.")
-        return []
     
+    # Si config es un objeto y no un diccionario, lo manejamos
     try:
-        # Aquí config['db_name'] ya trae 'unilova', 'mektia', etc.
+        # Intentamos obtener el nombre de la BD de forma segura
+        if isinstance(config, dict):
+            db_nombre = config.get('db_name', 'mektia')
+        else:
+            # Si es un objeto, intentamos acceder como atributo
+            db_nombre = getattr(config, 'db_name', 'mektia')
+            
+        logging.info(f"🕵️ Buscando en BD: {db_nombre}")
+        
         conn = get_db_connection(config) 
         cursor = conn.cursor(dictionary=True)
         
@@ -84,10 +87,11 @@ def obtener_historial(numero, limite=5, config=None):
         historial = cursor.fetchall()
         cursor.close()
         conn.close()
-        print("DEBUG: Usando historial desde SERVICES")
+        
+        logging.info(f"✅ Historial recuperado: {len(historial)} registros.")
         historial.reverse()
         return historial
+
     except Exception as e:
-        logging.error(f"❌ Error al obtener historial: {e}")
-        #logger.error(f"❌ Error al obtener historial: {e}")
+        logging.error(f"❌ Error real en obtener_historial: {str(e)}")
         return []
