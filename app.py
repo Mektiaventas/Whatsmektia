@@ -9445,7 +9445,7 @@ def notificar_asesor_asignado(asesor, numero_cliente, config=None):
 
 # ----------------- Generar Respuesta de Deepseek con TTS y Variables Sincronizadas -----------------
 # ----------------- Generar Respuesta de Deepseek FULL (Protegida) -----------------
-def generar_respuesta_deepseek(numero, texto, precios, historial_compartido, config, incoming_saved=False, es_audio=False, es_imagen=False, imagen_base64=None, transcripcion=None, catalog_list=None, texto_catalogo=None, producto_aplica="NO_APLICA"):
+def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, incoming_saved=False, es_audio=False, es_imagen=False, imagen_base64=None, transcripcion=None, catalog_list=None, texto_catalogo=None, producto_aplica="NO_APLICA"):
     try:
         # 1. IMPORTS
         import os, json, requests, time
@@ -9488,8 +9488,8 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_compartido, con
 
         # 4. PREPARACIÓN DE MENSAJES (HISTORIAL)
         lista_mensajes = [{"role": "system", "content": system_prompt}]
-        if historial:
-            for h in historial[-6:]:
+        if historial_final:
+            for h in historial_final[-6:]:
                 rol = "assistant" if h.get('enviado_por') == 'ia' else "user"
                 lista_mensajes.append({"role": rol, "content": h.get('mensaje', '')})
         lista_mensajes.append({"role": "user", "content": texto})
@@ -10351,7 +10351,7 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_i
                 productos_para_ficha = precios[:3]
 
     if not productos_para_ficha:
-        generar_respuesta_deepseek(numero=numero, texto=texto, precios=precios, historial=obtener_historial(numero, limite=6, config=config), config=config, incoming_saved=incoming_saved, es_audio=es_audio)
+        generar_respuesta_deepseek(numero=numero, texto=texto, precios=precios, historial_final=historial_final, config=config, incoming_saved=incoming_saved, es_audio=es_audio)
         return True
 
     # --- BLOQUE UNIFICADO "LA CHULADA" ---
