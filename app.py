@@ -10197,16 +10197,14 @@ EJEMPLOS:
         return False
         
 def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_final=None):
-    # Usamos el historial que viene "desde arriba" o lo buscamos si no existe
+    """
+    Versión DEFINITIVA y OPTIMIZADA: 
+    Usa el historial_final inyectado y elimina consultas redundantes a la DB.
+    """
+    # 1. Usar el historial que viene "desde arriba"
     if historial_final is None:
         historial_final = []
         
-    """
-    Versión DEFINITIVA: 
-    1. Orquestador: procesar_mensaje_unificado.
-    2. Formato: Imagen + Texto (Caption) en un solo globo.
-    3. Flujo: Si hay productos, envía ficha y termina (evita doble saludo).
-    """
     try:
         # --- DeepSeek Product & Visual Intent Detection ---
         producto_aplica = "NO_APLICA"
@@ -10214,11 +10212,12 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
         contexto_ia_final = "SI_APLICA"
         solicita_imagen_ia = False 
 
-        app.logger.info(f"🔎 Analizando intención con DeepSeek (Modo Fichas)...")
+        app.logger.info(f"🔎 Analizando intención con DeepSeek (Modo Fichas) usando historial inyectado...")
         
-        historial_objs = obtener_historial(numero, limite=5, config=config)
+        # --- CAMBIO CLAVE: Ya no llamamos a obtener_historial aquí ---
+        # Construimos el texto del historial directamente de la variable inyectada
         historial_text = ""
-        for h in historial_objs:
+        for h in historial_final[-5:]:  # Usamos los últimos 5 para contexto de intención
             msg_h = h.get('mensaje') or ""
             resp_h = h.get('respuesta') or ""
             if msg_h: historial_text += f"U: {msg_h}\n"
@@ -10250,8 +10249,7 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
         resp_ds = requests.post(DEEPSEEK_API_URL, headers=headers_ds, json=payload_ds, timeout=8)
         resp_ds.raise_for_status()
         ds_data = resp_ds.json()
-        raw_ds = ds_data['choices'][0]['message']['content']
-        raw_ds = (raw_ds or "").strip()
+        raw_ds = (ds_data['choices'][0]['message']['content'] or "").strip()
 
         if "SEARCH:" in raw_ds:
             producto_aplica = "SI_APLICA"
@@ -10263,10 +10261,12 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
             except IndexError: pass
         elif "AGENDAR_CITA" in raw_ds.upper():
             save_cita_inicial = {'servicio_solicitado': contexto_busqueda, 'telefono': numero}
-            manejar_guardado_cita_unificado(save_cita=save_cita_inicial, intent="AGENDAR_CITA", numero=numero, texto=texto, historial=historial_objs, catalog_list=[], respuesta_text=None, incoming_saved=incoming_saved, config=config)
+            # Pasamos historial_final a la siguiente función
+            manejar_guardado_cita_unificado(save_cita=save_cita_inicial, intent="AGENDAR_CITA", numero=numero, texto=texto, historial=historial_final, catalog_list=[], respuesta_text=None, incoming_saved=incoming_saved, config=config)
             return True
         elif "TRANSFERIR_ASESOR" in raw_ds.upper():
-            pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
+            # Inyectamos el historial para que el asesor reciba el resumen
+            pasar_contacto_asesor(numero, config=config, notificar_asesor=True, historial_inyectado=historial_final)
             enviar_mensaje(numero, "Claro, te estoy transfiriendo con un asesor humano. En un momento te atenderán.", config)
             return True
         elif "SI_APLICA" in raw_ds:
@@ -10296,7 +10296,9 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
             else:
                 productos_para_ficha = precios[:3]
 
+    # Si no hay fichas que enviar, delegamos a la respuesta de texto de DeepSeek
     if not productos_para_ficha:
+        # IMPORTANTE: Aquí también pasamos el historial_final
         generar_respuesta_deepseek(numero=numero, texto=texto, precios=precios, historial_final=historial_final, config=config, incoming_saved=incoming_saved, es_audio=es_audio)
         return True
 
@@ -10306,7 +10308,6 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
         sku_p = p.get('sku', '') or 'S/N'
         titulo_p = p.get('servicio') or p.get('modelo') or 'Producto'
         
-        # Formateo de Precios
         lineas_p = []
         for llave, etiqueta in [('precio_menudeo', 'Menudeo'), ('precio_mayoreo', 'Mayoreo'), ('inscripcion', 'Inscripción'), ('mensualidad', 'Mensualidad'), ('precio', 'Precio')]:
             val = p.get(llave)
@@ -10315,9 +10316,8 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
         
         precios_wa = "\n".join(lineas_p) if lineas_p else "💰 *Precio:* Consultar"
         desc_wa = p.get('descripcion') or ''
-        if len(desc_wa) > 250: desc_wa = desc_wa[:247] + "..." # Acortamos para que no sature
+        if len(desc_wa) > 250: desc_wa = desc_wa[:247] + "..."
 
-        # EL CAPTION (Formato Chulada)
         ficha_wa = (
             f"🔹 *{titulo_p.upper()}*\n\n"
             f"{precios_wa}\n"
@@ -10327,13 +10327,14 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
 
         if img_url:
             enviar_imagen(numero=numero, image_url=img_url, texto=ficha_wa, config=config)
+            # Aquí podrías usar el historial_final para actualizar si fuera necesario, 
+            # pero registrar_respuesta normalmente va a la BD
             actualizar_respuesta(numero, texto, f"Ficha enviada: {titulo_p}", config, respuesta_tipo='imagen', respuesta_media_url=img_url)
-            time.sleep(1) # Evita spam
+            time.sleep(1) 
         else:
-            # Si no hay imagen, al menos enviamos el texto
             enviar_mensaje(numero, ficha_wa, config)
 
-    return True # Aquí termina y evita que el orquestador principal gaste más tokens
+    return True
     
 def guardar_respuesta_sistema(numero, respuesta, config=None, respuesta_tipo='alerta_interna', respuesta_media_url=None):
     if config is None:
