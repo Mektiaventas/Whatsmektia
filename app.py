@@ -9736,7 +9736,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         # ================================================================
         # Llamamos a la función de fichas. 
         # Esta función internamente decidirá si manda texto simple o ficha con imagen.
-        if fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_inyectado=historial_final)):
+        if fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_inyectado=historial_final):
             app.logger.info(f"✅ Fichas enviadas, cerramos flujo para {numero}")
             return True
         # ================================================================
