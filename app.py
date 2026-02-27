@@ -10243,7 +10243,13 @@ EJEMPLOS:
         app.logger.error(traceback.format_exc())
         return False
         
-def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
+def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_inyectado=None):
+    # Usamos el historial que viene "desde arriba" o lo buscamos si no existe
+    if historial_inyectado is not None:
+        historial = historial_inyectado
+    else:
+        # Usamos la función que acabas de mover a services.py
+        historial = obtener_historial(numero, limite=5, config=config)
     """
     Versión DEFINITIVA: 
     1. Orquestador: procesar_mensaje_unificado.
