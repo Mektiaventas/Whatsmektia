@@ -60,11 +60,12 @@ def get_cliente_by_subdomain(subdominio):
         return None
 # Dentro de services.py
 def obtener_historial(numero, limite=5, config=None):
+    logging.info(f"!!! LLAMADA DETECTADA A obtener_historial PARA {numero} !!!")
     print(f"🕵️ Intentando obtener historial para: {numero} en BD: {config.get('db_name') if config else 'None'}")
     # Si por algún error llegara sin config, lanzamos un error claro
     if config is None:
         print(f"❌ Error crítico: Config es None para {numero}")
-        #logger.error(f"❌ Error crítico: Se intentó buscar historial para {numero} sin configuración de BD.")
+        logger.error(f"❌ Error crítico: Se intentó buscar historial para {numero} sin configuración de BD.")
         return []
     
     try:
