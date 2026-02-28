@@ -32,6 +32,28 @@ def get_db_connection(config=None):
             logger.error(f"❌ Error conectando a {db_name}: {e}")
             raise
     return _MYSQL_POOLS[pool_key].get_connection()
+def asegurar_configuracion_cliente(conn, db_name, subdominio):
+    """Asegura que la tabla configuracion del cliente tenga la columna dominio y esté llena."""
+    try:
+        cursor = conn.cursor()
+        # 1. Verificar si la columna 'dominio' existe
+        cursor.execute("SHOW COLUMNS FROM configuracion LIKE 'dominio'")
+        if not cursor.fetchone():
+            logger.info(f"🛠️ Reparando tabla configuracion en {db_name}: Agregando columna 'dominio'")
+            cursor.execute("ALTER TABLE configuracion ADD COLUMN dominio VARCHAR(255) AFTER id")
+        
+        # 2. Asegurar que el valor sea correcto (subdominio.mektia.com)
+        dominio_esperado = f"{subdominio}.mektia.com"
+        cursor.execute("""
+            UPDATE configuracion 
+            SET dominio = %s 
+            WHERE dominio IS NULL OR dominio = '' OR dominio != %s
+        """, (dominio_esperado, dominio_esperado))
+        
+        conn.commit()
+        cursor.close()
+    except Exception as e:
+        logger.error(f"❌ Error en auto-configuración para {db_name}: {e}")
 def get_cliente_by_subdomain(subdominio):
     try:
         # Conectamos a la base maestra 'clientes'
