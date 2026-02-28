@@ -48,7 +48,7 @@ from difflib import SequenceMatcher
 from whatsapp import enviar_mensaje, obtener_imagen_whatsapp  # <--- AQUÍ
 from flask import request
 from flask import request, jsonify, render_template
-from services import get_db_connection, get_cliente_by_subdomain, obtener_historial
+from services import get_db_connection, asegurar_configuracion_cliente, get_cliente_by_subdomain, obtener_historial
 from bot_logic.leads import start_followup_scheduler
 MASTER_COLUMNS = [
     'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
@@ -8205,6 +8205,30 @@ def webhook():
         # 3. IDENTIFICACIÓN DINÁMICA DEL TENANT
         config = obtener_configuracion_por_host()
         
+        # 🔥 LÓGICA DE AUTO-SANACIÓN V2: 
+        # Si el config no trae 'dominio', entramos a reparar la BD del cliente.
+        if config and config.get('db_name') and 'dominio' not in config:
+            subdominio = config.get('db_name')
+            app.logger.info(f"🛠️ Detectada base de datos V1 o incompleta: {subdominio}. Iniciando auto-reparación...")
+            try:
+                # 1. Abrimos conexión temporal a la BD del cliente
+                conn_reparar = get_db_connection(config)
+                
+                # 2. Ejecutamos la función de services.py para crear columna y llenar datos
+                from services import asegurar_configuracion_cliente
+                asegurar_configuracion_cliente(conn_reparar, subdominio, subdominio)
+                
+                # 3. Cerramos la conexión de reparación
+                conn_reparar.close()
+                
+                # 4. RE-CARGAR CONFIG: Ahora el diccionario ya incluirá la columna 'dominio'
+                config = obtener_configuracion_por_host()
+                app.logger.info(f"✅ Base de datos {subdominio} actualizada y config recargada con éxito.")
+                
+            except Exception as e:
+                app.logger.error(f"⚠️ Error crítico en el flujo de auto-reparación: {e}")
+
+        # Continuación del flujo normal
         metadata = change.get('metadata', {})
         phone_number_id = metadata.get('phone_number_id')
         app.logger.info(f"📞 Webhook recibido para Phone ID: {phone_number_id} | Host: {request.host}")
