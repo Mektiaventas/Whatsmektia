@@ -9347,22 +9347,25 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
         que_hace = config.get('que_hace') or "Asistir a los clientes."
         subdominio = config.get('subdominio_actual') or config.get('dominio', 'mektia').split('.')[0]
         
-        # Usamos catalog_list si viene, si no, intentamos usar 'precios' que ya pasamos por parámetro
         items_catalogo = catalog_list if catalog_list else precios
         hay_productos = bool(items_catalogo and len(items_catalogo) > 0)
 
         # 3. CONSTRUCCIÓN DEL CONTEXTO PARA LA IA
         contexto_productos = ""
         if hay_productos:
-            contexto_productos = "\nLISTA DE PRECIOS/PRODUCTOS DISPONIBLES (Usa esta información):\n"
-            for p in items_catalogo[:15]: # Limitamos a 15 para no saturar el prompt
+            contexto_productos = "\nLISTA DE PRECIOS/PRODUCTOS (Usa este formato: *Nombre* - $Precio):\n"
+            for p in items_catalogo[:15]:
                 nombre = p.get('servicio') or p.get('modelo') or p.get('nombre')
                 precio = p.get('precio_menudeo') or p.get('precio') or "Consultar"
-                contexto_productos += f"- {nombre}: ${precio}\n"
+                contexto_productos += f"• *{nombre}*: ${precio}\n"
 
-        # Análisis de repetición (Memoria RAM)
+        # Análisis de repetición: Si ya hay mensajes de la IA en el historial, le prohibimos presentarse
         ya_saludo = any(h.get('enviado_por') == 'ia' for h in historial_final)
-        identidad_instruccion = f"Identifícate como {ia_nombre} de {negocio_nombre}." if not ya_saludo else "Ya saludaste, no repitas tu nombre."
+        
+        if not ya_saludo:
+            identidad_instruccion = f"Identifícate como {ia_nombre} de {negocio_nombre}."
+        else:
+            identidad_instruccion = "IMPORTANTE: Ya saludaste anteriormente. NO repitas tu nombre ni el del negocio. Ve directo al grano."
 
         system_prompt = f"""
         Eres {ia_nombre}, el asistente inteligente de {negocio_nombre}.
@@ -9374,20 +9377,13 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
         
         {contexto_productos}
 
-        REGLAS DE FORMATO (OBLIGATORIO):
-        1. Usa *negritas* (encerrando entre asteriscos) para resaltar: Nombres de productos, precios, horarios, y el nombre del negocio.
-        2. Usa viñetas (•) para listar productos o características. No amontones la información.
-        3. Separa los párrafos con saltos de línea para que el mensaje sea fácil de leer en móviles.
-        4. Usa emojis de forma sutil para dar cercanía (ej: 👋, ✅, 🎓, 📞).
-        5. Máximo 4 líneas por párrafo.
+        REGLAS DE FORMATO:
+        1. Usa *negritas* para resaltar productos, precios y puntos clave.
+        2. Usa viñetas (•) para listas.
+        3. Separa párrafos con saltos de línea.
+        4. Responde de forma natural y breve (máximo 3-4 líneas).
 
-        INSTRUCCIONES DE CONTENIDO:
-        1. Responde de forma natural y amable.
-        2. Usa el historial proporcionado para mantener la coherencia.
-        3. Si el usuario pregunta por algo que NO está en la lista de productos, indica con amabilidad que no tienes el dato exacto pero ofrece lo más parecido.
-        4. OBLIGATORIO: Responde SOLAMENTE con un objeto JSON válido.
-
-        FORMATO JSON REQUERIDO:
+        OBLIGATORIO: Responde SOLAMENTE con un objeto JSON válido.
         {{
           "intent": "INFORMACION" | "PASAR_ASESOR",
           "respuesta_text": "Tu mensaje aquí...",
@@ -9396,18 +9392,15 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
         """
 
         # 4. PREPARACIÓN DE MENSAJES (HISTORIAL INYECTADO)
-        # Aquí es donde aprovechamos el historial_final que ya traemos desde el webhook
         lista_mensajes = [{"role": "system", "content": system_prompt}]
         
         if historial_final:
-            # Tomamos los últimos 8 mensajes para no exceder tokens pero mantener contexto rico
             for h in historial_final[-8:]:
                 rol = "assistant" if h.get('enviado_por') == 'ia' else "user"
-                # Priorizamos la transcripción si es un mensaje de audio
                 contenido = h.get('mensaje', '')
-                lista_mensajes.append({"role": rol, "content": contenido})
+                if contenido: # Solo añadir si hay texto
+                    lista_mensajes.append({"role": rol, "content": contenido})
         
-        # Añadimos el mensaje actual
         texto_actual = transcripcion if es_audio and transcripcion else texto
         lista_mensajes.append({"role": "user", "content": texto_actual})
 
@@ -9455,41 +9448,40 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
                 app.logger.error(f"🔴 Error TTS: {e}")
 
         # 8. EJECUTAR ACCIÓN DE ASESOR
-        # --- BLOQUE DE TRANSFERENCIA CON FILTRO DE PACIENCIA ---
-        if intent == "PASAR_ASESOR" or notify_asesor is True:
-            # 1. Definimos qué mensajes NO deben disparar transferencia aunque la IA se asuste
+        if intent == "PASAR_ASESOR" or notify_asesor is True or usuario_quiere_humano:
             saludos_simples = ["hola", "buen dia", "buenas tardes", "buenas noches", "hey", "que tal"]
-            mensaje_limpio = texto.lower().strip()
+            mensaje_limpio = texto_actual.lower().strip()
             es_solo_saludo = mensaje_limpio in saludos_simples
             
-            # 2. Analizamos si hay frustración real
-            palabras_frustracion = ["mal", "terrible", "ayuda", "humano", "persona", "asesor", "no entiendo"]
-            usuario_pide_humano = any(p in mensaje_limpio for p in palabras_frustracion)
-            
-            # 3. Lógica de decisión: Solo transferimos si NO es un saludo O si pidió un humano explícitamente
-            if es_solo_saludo and not usuario_pide_humano:
-                app.logger.info(f"🤖 LOVA ignora petición de transferencia: Es solo un saludo ('{texto}')")
-                # Forzamos a que siga el flujo de respuesta de texto normal
-                intent = "RESPONDER_TEXTO" 
+            # Solo evitamos transferir si es un saludo simple SIN queja
+            if es_solo_saludo and not usuario_quiere_humano:
+                app.logger.info(f"🤖 LOVA ignora petición de transferencia: Es solo un saludo.")
             else:
                 app.logger.info(f"🚀 TRANSFERENCIA VALIDADA: Pasando {numero} a un asesor.")
-                sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
-                mensaje_para_cliente = respuesta_text or "Claro, en un momento un asesor humano te contactará."
+                from funciones_asesor import pasar_contacto_asesor
+                pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
                 
+                # CORRECCIÓN: Usamos mensaje_para_cliente (que viene de la IA) o texto por defecto
+                msg_final = mensaje_para_cliente or "Un momento, te comunico con un asesor."
+                
+                from whatsapp import enviar_mensaje
                 if numero.startswith('tg_'):
                     telegram_token = config.get('telegram_token')
                     if telegram_token:
                         chat_id = numero.replace('tg_', '')
-                        send_telegram_message(chat_id, mensaje_para_cliente, telegram_token) 
+                        from telegram_utils import send_telegram_message
+                        send_telegram_message(chat_id, msg_final, telegram_token) 
                 else:
-                    enviar_mensaje(numero, mensaje_para_cliente, config) 
+                    enviar_mensaje(numero, msg_final, config) 
                 
-                registrar_respuesta_bot(numero, texto, mensaje_para_cliente, config, incoming_saved=incoming_saved)
+                from whatsapp import registrar_respuesta_bot
+                registrar_respuesta_bot(numero, texto_actual, msg_final, config, incoming_saved=incoming_saved)
                 return True
+
         # 9. ENVÍO FINAL
         from whatsapp import enviar_mensaje, enviar_mensaje_voz
         if audio_url_publica:
-            enviar_mensaje(numero, f"*(Audio)* {mensaje_para_cliente}", config)
+            enviar_mensaje(numero, mensaje_para_cliente, config)
             enviar_mensaje_voz(numero, audio_url_publica, config)
         else:
             enviar_mensaje(numero, mensaje_para_cliente, config)
@@ -9506,6 +9498,7 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
 
         # 10. REGISTRO EN DB
         try:
+            from whatsapp import registrar_respuesta_bot
             registrar_respuesta_bot(
                 numero, texto_actual, mensaje_para_cliente, config, 
                 incoming_saved=incoming_saved, 
