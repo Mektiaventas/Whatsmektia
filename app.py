@@ -6785,19 +6785,36 @@ def asignar_asesor_a_cliente(numero_cliente, asesor, config=None):
         app.logger.error(f"🔴 obtener_siguiente_asesor error: {e}")
         return None
 
-def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True, historial_inyectado=None):
+def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True, historial_final=None):
     """
-    Versión OPTIMIZADA: Usa historial_inyectado para generar el resumen IA 
-    instantáneamente y notificar al asesor sin latencia de DB.
+    Versión OPTIMIZADA: Usa historial_final para generar el resumen IA 
+    y previene asignaciones erróneas en saludos.
     """
     if config is None:
         config = obtener_configuracion_por_host()
+    
     try:
-        # Asegurar que las tablas necesarias existan
+        # 1. VALIDACIÓN ANTI-SALUDO (Freno de mano antes de rotar)
+        # Extraemos el último mensaje del historial para verificar si es solo un saludo
+        ultimo_msj_texto = ""
+        if historial_final:
+            # Buscamos el último mensaje que sea del usuario ('U:')
+            for h in reversed(historial_final):
+                if h.get('mensaje'):
+                    ultimo_msj_texto = str(h.get('mensaje')).lower().strip()
+                    break
+        
+        saludos_bloqueo = ["hola", "buenas", "buen dia", "buen día", "hey", "qué tal", "que tal", "hola!", "hola."]
+        
+        if ultimo_msj_texto in saludos_bloqueo:
+            app.logger.info(f"🛑 pasar_contacto_asesor ABORTADO: El último mensaje '{ultimo_msj_texto}' es un saludo. No rotamos asesor.")
+            return False
+
+        # --- Asegurar que las tablas necesarias existan ---
         _ensure_sistema_config_table(config)
         _ensure_asesor_id_column(config)
         
-        # Obtener el asesor asignado
+        # 2. OBTENER ASESOR (Aquí es donde se dispara la rotación)
         asesor = obtener_siguiente_asesor(numero_cliente, config)
         if not asesor:
             app.logger.info("ℹ️ No hay asesores configurados para pasar contacto")
@@ -6806,8 +6823,8 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True, hi
         nombre = asesor.get('nombre') or 'Asesor'
         telefono = asesor.get('telefono') or ''
 
-        # --- LÓGICA DE MOVIMIENTO DE KANBAN (Simplificada) ---
-        columna_destino_id = 3 # Fallback: Esperando Respuesta
+        # --- LÓGICA DE MOVIMIENTO DE KANBAN ---
+        columna_destino_id = 3 # Fallback
         try:
             cfg_full = load_config(config)
             asesores_list = cfg_full.get('asesores_list', [])
@@ -6837,15 +6854,12 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True, hi
         if enviado:
             guardar_conversacion(numero_cliente, f"Solicitud de asesor", texto_cliente, config)
 
-        # --- 2. NOTIFICAR AL ASESOR (USANDO HISTORIAL INYECTADO) ---
+        # --- 3. NOTIFICAR AL ASESOR (USANDO historial_final) ---
         if notificar_asesor and telefono:
             try:
                 cliente_mostrado = obtener_nombre_mostrado_por_numero(numero_cliente, config) or numero_cliente
-
-                # CAMBIO CLAVE: Usamos el historial que ya traemos en RAM
-                historial = historial_inyectado if historial_inyectado is not None else []
+                historial = historial_final if historial_final is not None else []
                 
-                # Si por alguna razón llegó vacío, solo en ese caso extremo consultamos
                 if not historial:
                     historial = obtener_historial(numero_cliente, limite=8, config=config) or []
 
@@ -6868,8 +6882,7 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True, hi
                     r = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=7)
                     if r.status_code == 200:
                         resumen = r.json()['choices'][0]['message']['content'].strip()
-                except:
-                    pass
+                except: pass
 
                 texto_asesor = (
                     f"🔔 *NUEVA ASIGNACIÓN*\n\n"
@@ -6878,11 +6891,9 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True, hi
                     f"🔗 *Chat:* https://wa.me/{numero_cliente.lstrip('+')}"
                 )
 
-                # Notificar al asesor
                 if not telefono.startswith('tg_'):
                     enviar_mensaje(telefono, texto_asesor, config)
                 
-                # Registrar alerta en el hilo del asesor para que lo vea en su CRM
                 inicializar_chat_meta(telefono, config)
                 guardar_respuesta_sistema(
                     telefono, 
@@ -6891,14 +6902,13 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True, hi
                     respuesta_tipo='alerta_interna', 
                     respuesta_media_url=f"Cliente: {numero_cliente}" 
                 )
-
             except Exception as e:
                 app.logger.warning(f"⚠️ Error notificando asesor: {e}")
         
         # Mover chats en el Kanban
         actualizar_columna_chat(numero_cliente, columna_destino_id, config)
-        
         return enviado
+
     except Exception as e:
         app.logger.error(f"🔴 pasar_contacto_asesor error: {e}")
         return False
