@@ -9374,10 +9374,17 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
         
         {contexto_productos}
 
-        INSTRUCCIONES DE RESPUESTA:
-        1. Responde de forma natural y breve (máximo 3 líneas).
+        REGLAS DE FORMATO (OBLIGATORIO):
+        1. Usa *negritas* (encerrando entre asteriscos) para resaltar: Nombres de productos, precios, horarios, y el nombre del negocio.
+        2. Usa viñetas (•) para listar productos o características. No amontones la información.
+        3. Separa los párrafos con saltos de línea para que el mensaje sea fácil de leer en móviles.
+        4. Usa emojis de forma sutil para dar cercanía (ej: 👋, ✅, 🎓, 📞).
+        5. Máximo 4 líneas por párrafo.
+
+        INSTRUCCIONES DE CONTENIDO:
+        1. Responde de forma natural y amable.
         2. Usa el historial proporcionado para mantener la coherencia.
-        3. Si el usuario pregunta por algo que NO está en la lista de productos, responde con amabilidad que no tienes esa información exacta pero ofrece lo más parecido.
+        3. Si el usuario pregunta por algo que NO está en la lista de productos, indica con amabilidad que no tienes el dato exacto pero ofrece lo más parecido.
         4. OBLIGATORIO: Responde SOLAMENTE con un objeto JSON válido.
 
         FORMATO JSON REQUERIDO:
