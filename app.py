@@ -10231,11 +10231,17 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
             manejar_guardado_cita_unificado(save_cita=save_cita_inicial, intent="AGENDAR_CITA", numero=numero, texto=texto, historial_final=historial_final, catalog_list=[], respuesta_text=None, incoming_saved=incoming_saved, config=config)
             return True
         elif "TRANSFERIR_ASESOR" in raw_ds.upper():
-            # Notificamos al asesor y enviamos la tarjeta de contacto/nombre al cliente
-            pasar_contacto_asesor(numero, config=config, notificar_asesor=True, historial_final=historial_final)
-            # Eliminamos el enviar_mensaje genérico para evitar duplicidad
-            app.logger.info(f"✅ Transferencia ejecutada para {numero}. Se omitió mensaje duplicado.")
-            return True
+            # Intentamos pasar al asesor
+            fue_transferido = pasar_contacto_asesor(numero, config=config, notificar_asesor=True, historial_final=historial_final)
+            
+            if fue_transferido:
+                app.logger.info(f"✅ Transferencia ejecutada para {numero}. Se omitió mensaje duplicado.")
+                return True
+            else:
+                # Si regresó False (por ser saludo), forzamos a que LOVA responda normal
+                app.logger.info(f"🔄 Redirigiendo saludo a respuesta de texto normal de la IA para {numero}")
+                generar_respuesta_deepseek(numero=numero, texto=texto, precios=[], historial_final=historial_final, config=config, incoming_saved=incoming_saved, es_audio=es_audio)
+                return True
         elif "SI_APLICA" in raw_ds:
             producto_aplica = "SI_APLICA"
 
