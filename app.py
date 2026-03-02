@@ -9457,19 +9457,37 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
                 app.logger.error(f"🔴 Error TTS: {e}")
 
         # 8. EJECUTAR ACCIÓN DE ASESOR
-        if intent == "PASAR_ASESOR" or notify_asesor or usuario_quiere_humano:
-            try:
-                from whatsapp import enviar_mensaje 
-                # Pasamos el historial_final para que el asesor sepa de qué viene la charla
-                pasar_contacto_asesor(numero, config=config, notificar_asesor=True, historial_inyectado=historial_final)
+        # --- BLOQUE DE TRANSFERENCIA CON FILTRO DE PACIENCIA ---
+        if intent == "PASAR_ASESOR" or notify_asesor is True:
+            # 1. Definimos qué mensajes NO deben disparar transferencia aunque la IA se asuste
+            saludos_simples = ["hola", "buen dia", "buenas tardes", "buenas noches", "hey", "que tal"]
+            mensaje_limpio = texto.lower().strip()
+            es_solo_saludo = mensaje_limpio in saludos_simples
+            
+            # 2. Analizamos si hay frustración real
+            palabras_frustracion = ["mal", "terrible", "ayuda", "humano", "persona", "asesor", "no entiendo"]
+            usuario_pide_humano = any(p in mensaje_limpio for p in palabras_frustracion)
+            
+            # 3. Lógica de decisión: Solo transferimos si NO es un saludo O si pidió un humano explícitamente
+            if es_solo_saludo and not usuario_pide_humano:
+                app.logger.info(f"🤖 LOVA ignora petición de transferencia: Es solo un saludo ('{texto}')")
+                # Forzamos a que siga el flujo de respuesta de texto normal
+                intent = "RESPONDER_TEXTO" 
+            else:
+                app.logger.info(f"🚀 TRANSFERENCIA VALIDADA: Pasando {numero} a un asesor.")
+                sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
+                mensaje_para_cliente = respuesta_text or "Claro, en un momento un asesor humano te contactará."
                 
-                msg_final_asesor = "Entendido, te estoy transfiriendo con un asesor humano para ayudarte mejor. En un momento te contactarán."
-                enviar_mensaje(numero, msg_final_asesor, config)
-                registrar_respuesta_bot(numero, texto_actual, msg_final_asesor, config, incoming_saved=incoming_saved)
-                return True 
-            except Exception as e:
-                app.logger.error(f"🔴 Error al pasar a asesor: {e}")
-
+                if numero.startswith('tg_'):
+                    telegram_token = config.get('telegram_token')
+                    if telegram_token:
+                        chat_id = numero.replace('tg_', '')
+                        send_telegram_message(chat_id, mensaje_para_cliente, telegram_token) 
+                else:
+                    enviar_mensaje(numero, mensaje_para_cliente, config) 
+                
+                registrar_respuesta_bot(numero, texto, mensaje_para_cliente, config, incoming_saved=incoming_saved)
+                return True
         # 9. ENVÍO FINAL
         from whatsapp import enviar_mensaje, enviar_mensaje_voz
         if audio_url_publica:
