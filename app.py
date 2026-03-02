@@ -6528,17 +6528,18 @@ def guardar_respuesta_imagen(numero, imagen_url, config=None, nota='[Imagen envi
         app.logger.error(f"❌ Error guardando respuesta-imagen para {numero}: {e}")
         return False
 
-def obtener_siguiente_asesor(numero_cliente=None, config=None, force_rotation=False, texto_usuario=""): #Si se usa
+def obtener_siguiente_asesor(numero_cliente=None, config=None, texto_usuario=""):
     """
-    MODIFICADA: Solo asigna nuevo asesor si force_rotation es True 
-    o si no es un simple saludo.
+    Obtiene el asesor asignado persistentemente al cliente. 
+    Si el cliente no tiene asignación, asigna el siguiente por rotación, 
+    A MENOS que el mensaje sea solo un saludo.
     """
     if config is None:
         config = obtener_configuracion_por_host()
     
-    # --- LISTA DE SALUDOS PARA BLOQUEO ---
-    saludos = ["hola", "buenas", "buen dia", "buen día", "hey", "que tal", "qué tal"]
-    es_saludo = texto_usuario.lower().strip() in saludos
+    # --- FILTRO ANTI-SALUDO (Para evitar asignaciones prematuras) ---
+    saludos_bloqueo = ["hola", "buenas", "buen dia", "buen día", "hey", "qué tal", "que tal", "buenas tardes", "buenas noches"]
+    es_solo_saludo = str(texto_usuario).lower().strip() in saludos_bloqueo
 
     try:
         _ensure_asesor_id_column(config)
@@ -6561,19 +6562,17 @@ def obtener_siguiente_asesor(numero_cliente=None, config=None, force_rotation=Fa
                 asesor_tel_existente = contacto['asesor_id'].strip()
                 for asesor in asesores_list:
                     if (asesor.get('telefono') or '').strip() == asesor_tel_existente:
-                        app.logger.info(f"✅ Persistencia: Cliente {numero_cliente} con asesor {asesor.get('nombre')}")
+                        app.logger.info(f"✅ Persistencia: Cliente {numero_cliente} reenviado a asesor {asesor.get('nombre')}")
                         cursor.close(); conn.close()
                         return asesor
             cursor.close(); conn.close()
 
-        # --- 2. LÓGICA DE ROTACIÓN (EL FRENO DE MANO) ---
-        
-        # SI NO HAY ASESOR Y ES UN SALUDO, NO ASIGNAMOS NADA NUEVO AÚN
-        if not force_rotation and es_saludo:
+        # --- 2. ASIGNACIÓN POR ROTACIÓN (Solo si NO es un saludo) ---
+        if es_solo_saludo:
             app.logger.info(f"🤖 LOVA mantiene el control: '{texto_usuario}' detectado como saludo. No se dispara rotación.")
             return None
 
-        # Si llegamos aquí, es porque NO hay asesor Y (o es un mensaje real o forzamos la rotación)
+        # Proceso de rotación normal
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         cursor.execute("SELECT valor FROM sistema_config WHERE clave = 'ultimo_asesor_asignado'")
@@ -6583,7 +6582,7 @@ def obtener_siguiente_asesor(numero_cliente=None, config=None, force_rotation=Fa
         if resultado:
             try:
                 ultimo_indice = int(resultado['valor']) % len(asesores_list)
-            except:
+            except Exception:
                 ultimo_indice = 0
         
         siguiente_indice = (ultimo_indice + 1) % len(asesores_list)
@@ -9247,46 +9246,37 @@ def manejar_solicitud_asesor(numero, mensaje, config=None):
         config = obtener_configuracion_por_host()
     
     try:
-        # Asegurar que las tablas necesarias existan
         _ensure_sistema_config_table(config)
         _ensure_asesor_id_column(config)
         
-        # Obtener el asesor (esta función ahora verifica asignaciones existentes)
-        asesor = obtener_siguiente_asesor(numero, config)
+        # --- CAMBIO AQUÍ: Pasamos el mensaje para que el filtro funcione ---
+        asesor = obtener_siguiente_asesor(numero, config, texto_usuario=mensaje)
         
+        # Si la función devolvió None (porque es saludo o no hay asesores)
         if not asesor:
-            respuesta = "⚠️ En este momento no hay asesores disponibles. Por favor, intenta más tarde."
-            guardar_conversacion(numero, mensaje, respuesta, config)
-            return respuesta
+            # Si es saludo, no queremos enviar el error de "no hay asesores", 
+            # simplemente dejamos que el flujo siga a la IA.
+            return None 
         
-        # Construir mensaje de respuesta
         nombre_asesor = asesor.get('nombre', 'Asesor')
         telefono_asesor = asesor.get('telefono', '')
         email_asesor = asesor.get('email', '')
         
         respuesta = f"👨‍💼 *{nombre_asesor}* es tu asesor asignado.\n\n"
-        
         if telefono_asesor:
             respuesta += f"📞 Teléfono: {telefono_asesor}\n"
-        
         if email_asesor:
             respuesta += f"📧 Email: {email_asesor}\n"
-        
         respuesta += "\n¡Estará encantado de ayudarte! Puedes contactarlo directamente."
         
-        # Guardar la conversación
         guardar_conversacion(numero, mensaje, respuesta, config)
-        
-        # Notificar al asesor sobre la asignación
         notificar_asesor_asignado(asesor, numero, config)
         
         return respuesta
         
     except Exception as e:
         app.logger.error(f"🔴 Error manejando solicitud de asesor: {e}")
-        respuesta = "❌ Lo siento, hubo un error al asignar un asesor. Por favor, intenta más tarde."
-        guardar_conversacion(numero, mensaje, respuesta, config)
-        return respuesta
+        return None
 
 def notificar_asesor_asignado(asesor, numero_cliente, config=None):
     """Notifica al asesor que se le ha asignado un cliente"""
