@@ -9411,7 +9411,7 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
             "temperature": 0.4
         }
         
-        resp = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload, timeout=12)
+        resp = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload, timeout=30)
         resp.raise_for_status()
         res_raw = resp.json()['choices'][0]['message']['content']
         decision = json.loads(res_raw)
