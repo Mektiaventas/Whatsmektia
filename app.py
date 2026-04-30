@@ -9348,6 +9348,7 @@ def notificar_asesor_asignado(asesor, numero_cliente, config=None):
 
 # ----------------- Generar Respuesta de Deepseek con TTS y Variables Sincronizadas -----------------
 # ----------------- Generar Respuesta de Deepseek FULL (Protegida) -----------------
+# ----------------- Generar Respuesta de Deepseek FULL (Restaurada y Corregida) -----------------
 def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, incoming_saved=False, es_audio=False, es_imagen=False, imagen_base64=None, transcripcion=None, catalog_list=None, texto_catalogo=None, producto_aplica="NO_APLICA"):
     try:
         # 1. IMPORTS
@@ -9359,13 +9360,12 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
         ia_nombre = config.get('ia_nombre') or "Asistente"
         negocio_nombre = config.get('negocio_nombre') or "Negocio"
         que_hace = config.get('que_hace') or "Asistir a los clientes."
-        subdominio = config.get('subdominio_actual') or config.get('dominio', 'mektia').split('.')[0]
+        subdominio = config.get('subdominio_actual') or config.get('dominio', 'mektia').split('.')
         
         items_catalogo = catalog_list if catalog_list else precios
         hay_productos = bool(items_catalogo and len(items_catalogo) > 0)
 
-        # 3. LÓGICA DE SALUDO (Basada en historial)
-        # Si ya hay mensajes de la IA en el historial, cambiamos la instrucción
+        # 3. LÓGICA DE SALUDO (Identidad)
         ya_saludo = any(h.get('enviado_por') == 'ia' for h in historial_final)
         identidad_instruccion = ""
         if not ya_saludo:
@@ -9383,20 +9383,15 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
 
         system_prompt = f"""
         Eres {ia_nombre}, el asistente inteligente de {negocio_nombre}.
-        
         {identidad_instruccion}
-        
         MISIÓN: {que_hace}
-        
         {contexto_productos}
+        REGLAS DE FORMATO:
+        1. Usa *negritas* para resaltar.
+        2. Usa viñetas (•) y saltos de línea DOBLES.
+        3. Usa emojis sutiles.
 
-        REGLAS DE FORMATO (OBLIGATORIO):
-        1. Usa *negritas* para resaltar nombres de productos y precios.
-        2. Usa viñetas (•) para listas.
-        3. IMPORTANTE: Deja un salto de línea DOBLE entre cada párrafo o punto de la lista para que no se vea amontonado.
-        4. Usa emojis sutiles.
-
-        OBLIGATORIO: Responde SOLAMENTE con un objeto JSON válido.
+        OBLIGATORIO: Responde SOLAMENTE con un objeto JSON válido:
         {{
           "intent": "INFORMACION" | "PASAR_ASESOR",
           "respuesta_text": "Tu mensaje aquí...",
@@ -9427,74 +9422,57 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
         
         resp = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload, timeout=30)
         resp.raise_for_status()
-        res_raw = resp.json()['choices'][0]['message']['content']
+        res_raw = resp.json()['choices']['message']['content']
         decision = json.loads(res_raw)
         
         mensaje_para_cliente = decision.get('respuesta_text') or "Entiendo, ¿en qué más puedo ayudarte?"
         
-        # --- TRUCO DE FORMATO: Forzamos saltos de línea en las viñetas ---
         if "•" in mensaje_para_cliente:
-            # Reemplazamos la viñeta por dos saltos de línea y la viñeta
-            mensaje_para_cliente = mensaje_para_cliente.replace("•", "\n\n•")
-            # Limpiamos si se crearon demasiados al inicio
-            mensaje_para_cliente = mensaje_para_cliente.strip()
+            mensaje_para_cliente = mensaje_para_cliente.replace("•", "\n\n•").strip()
 
         intent = (decision.get('intent') or "INFORMACION").upper()
         notify_asesor = bool(decision.get('notify_asesor'))
 
-        # 6. LÓGICA DE ASESOR (CORREGIDA Y CON REGISTRO DIRECTO)
+        # 6. LÓGICA DE ASESOR (Corregida para evitar el bucle de "Redirigiendo Saludo")
         palabras_humano = ["asesor", "humano", "persona", "hablar con alguien", "ayuda", "llamar"]
         usuario_quiere_humano = any(w in texto_actual.lower() for w in palabras_humano)
 
         if intent == "PASAR_ASESOR" or notify_asesor or usuario_quiere_humano:
-            if not (texto_actual.lower().strip() in ["hola", "buen dia", "hey"]):
-                
-                from services import obtener_asesor_actual
-                asesor_asignado = obtener_asesor_actual(numero, config=config)
+            # Quitamos la redirección forzada a saludo si tiene asesor
+            from services import obtener_asesor_actual
+            asesor_asignado = obtener_asesor_actual(numero, config=config)
 
-                if not asesor_asignado or asesor_asignado.lower() == 'ia':
-                    app.logger.info(f"🚀 TRANSFERENCIA: Pasando {numero} a asesor nuevo.")
-                    from funciones_asesor import pasar_contacto_asesor
-                    pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
-                else:
-                    app.logger.info(f"📍 Respetando dueño: {numero} ya pertenece a {asesor_asignado}")
-                
-                from whatsapp import enviar_mensaje
-                enviar_mensaje(numero, mensaje_para_cliente, config)
-                
-                # --- REGISTRO DIRECTO SIN IMPORTACIONES EXTERNAS ---
-                try:
-                    # Llamamos directamente a la función que ya reside en este archivo
-                    registrar_respuesta_bot(
-                        numero=numero, 
-                        mensaje=texto_actual, 
-                        respuesta=mensaje_para_cliente, 
-                        config=config, 
-                        incoming_saved=incoming_saved
-                    )
-                    app.logger.info(f"✅ Respuesta registrada en DB para {numero}")
-                except Exception as e:
-                    app.logger.error(f"❌ Error al registrar respuesta en bloque asesor: {e}")
-                
-                return True
+            if not asesor_asignado or asesor_asignado.lower() == 'ia':
+                from funciones_asesor import pasar_contacto_asesor
+                pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
+            
+            from whatsapp import enviar_mensaje
+            enviar_mensaje(numero, mensaje_para_cliente, config)
+            
+            # --- LLAMADA DIRECTA AL REGISTRO ---
+            registrar_respuesta_bot(numero, texto_actual, mensaje_para_cliente, config, incoming_saved=incoming_saved)
+            return True
 
         # 7. ENVÍO FINAL
         from whatsapp import enviar_mensaje, enviar_mensaje_voz
-        enviar_mensaje(numero, mensaje_para_cliente, config)
+        if es_audio:
+            # Si quieres mantener la voz, aquí llamarías a tu función de texto_a_voz
+            enviar_mensaje(numero, mensaje_para_cliente, config)
+        else:
+            enviar_mensaje(numero, mensaje_para_cliente, config)
 
-        # 8. REGISTRO EN DB (CON IMPORT DINÁMICO)
+        # 8. REGISTRO EN DB (CORREGIDO DE RAÍZ)
         try:
-            # Buscamos la función en el archivo app.py dinámicamente
-            import sys
-            if 'app' in sys.modules:
-                reg_func = getattr(sys.modules['app'], 'registrar_respuesta_bot', None)
-                if reg_func:
-                    reg_func(
-                        numero, texto_actual, mensaje_para_cliente, config, 
-                        incoming_saved=incoming_saved
-                    )
-                else:
-                    app.logger.warning("⚠️ No se encontró registrar_respuesta_bot en app.py")
+            # LLAMADA DIRECTA: Sin sys.modules, sin malabares. 
+            # Como la función está definida arriba en el mismo archivo, Python la encuentra.
+            registrar_respuesta_bot(
+                numero, 
+                texto_actual, 
+                mensaje_para_cliente, 
+                config, 
+                incoming_saved=incoming_saved
+            )
+            app.logger.info(f"✅ Historial guardado para {numero}")
         except Exception as e:
             app.logger.warning(f"⚠️ Error al registrar en DB: {e}")
 
