@@ -117,3 +117,29 @@ def obtener_historial(numero, limite=5, config=None):
     except Exception as e:
         logging.error(f"❌ Error real en obtener_historial: {str(e)}")
         return []
+def obtener_asesor_actual(numero, config=None):
+    """Consulta en la tabla contactos quién es el asesor asignado actualmente."""
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Asumiendo que tu tabla se llama 'contactos' y la columna 'asesor_asignado'
+        # Si tu columna se llama 'asesor' o similar, cámbiala aquí:
+        cursor.execute("""
+            SELECT asesor_asignado 
+            FROM contactos 
+            WHERE numero = %s 
+            LIMIT 1
+        """, (numero,))
+        
+        resultado = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if resultado:
+            return resultado.get('asesor_asignado')
+        return None
+
+    except Exception as e:
+        logging.error(f"❌ Error en obtener_asesor_actual: {str(e)}")
+        return None
