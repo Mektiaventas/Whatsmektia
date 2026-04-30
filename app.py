@@ -9403,9 +9403,10 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
         lista_mensajes = [{"role": "system", "content": system_prompt}]
         if historial_final:
             for h in historial_final[-8:]:
-                rol = "assistant" if h.get('enviado_por') == 'ia' else "user"
-                cont = h.get('mensaje', '')
-                if cont: lista_mensajes.append({"role": rol, "content": cont})
+                if isinstance(h, dict):
+                    rol = "assistant" if h.get('enviado_por') == 'ia' else "user"
+                    cont = h.get('mensaje', '')
+                    if cont: lista_mensajes.append({"role": rol, "content": cont})
         
         texto_actual = transcripcion if es_audio and transcripcion else texto
         lista_mensajes.append({"role": "user", "content": texto_actual})
@@ -9422,7 +9423,12 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
         
         resp = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload, timeout=30)
         resp.raise_for_status()
+        
+        # CORRECCIÓN DE ÍNDICE AQUÍ:
         res_raw = resp.json()['choices']['message']['content']
+        
+        # Limpieza por si devuelve markdown
+        res_raw = res_raw.replace("```json", "").replace("```", "").strip()
         decision = json.loads(res_raw)
         
         mensaje_para_cliente = decision.get('respuesta_text') or "Entiendo, ¿en qué más puedo ayudarte?"
@@ -9433,12 +9439,11 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
         intent = (decision.get('intent') or "INFORMACION").upper()
         notify_asesor = bool(decision.get('notify_asesor'))
 
-        # 6. LÓGICA DE ASESOR (Corregida para evitar el bucle de "Redirigiendo Saludo")
+        # 6. LÓGICA DE ASESOR
         palabras_humano = ["asesor", "humano", "persona", "hablar con alguien", "ayuda", "llamar"]
         usuario_quiere_humano = any(w in texto_actual.lower() for w in palabras_humano)
 
         if intent == "PASAR_ASESOR" or notify_asesor or usuario_quiere_humano:
-            # Quitamos la redirección forzada a saludo si tiene asesor
             from services import obtener_asesor_actual
             asesor_asignado = obtener_asesor_actual(numero, config=config)
 
@@ -9449,22 +9454,15 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
             from whatsapp import enviar_mensaje
             enviar_mensaje(numero, mensaje_para_cliente, config)
             
-            # --- LLAMADA DIRECTA AL REGISTRO ---
             registrar_respuesta_bot(numero, texto_actual, mensaje_para_cliente, config, incoming_saved=incoming_saved)
             return True
 
         # 7. ENVÍO FINAL
         from whatsapp import enviar_mensaje, enviar_mensaje_voz
-        if es_audio:
-            # Si quieres mantener la voz, aquí llamarías a tu función de texto_a_voz
-            enviar_mensaje(numero, mensaje_para_cliente, config)
-        else:
-            enviar_mensaje(numero, mensaje_para_cliente, config)
+        enviar_mensaje(numero, mensaje_para_cliente, config)
 
-        # 8. REGISTRO EN DB (CORREGIDO DE RAÍZ)
+        # 8. REGISTRO EN DB
         try:
-            # LLAMADA DIRECTA: Sin sys.modules, sin malabares. 
-            # Como la función está definida arriba en el mismo archivo, Python la encuentra.
             registrar_respuesta_bot(
                 numero, 
                 texto_actual, 
