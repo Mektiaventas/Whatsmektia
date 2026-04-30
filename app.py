@@ -9433,6 +9433,7 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
         
         # LA CORRECCIÓN REAL:
         datos_completos = resp.json()
+        app.logger.info("--- PRUEBA DE VIDA: EL CODIGO SE ACTUALIZO ---") # <--- Agrega esto
         res_raw = datos_completos['choices']['message']['content']
         
         decision = json.loads(res_raw)
