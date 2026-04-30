@@ -9428,24 +9428,36 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
         intent = (decision.get('intent') or "INFORMACION").upper()
         notify_asesor = bool(decision.get('notify_asesor'))
 
-        # 6. LÓGICA DE ASESOR
+        # 6. LÓGICA DE ASESOR (MODIFICADO CON FIDELIDAD REAL)
         palabras_humano = ["asesor", "humano", "persona", "hablar con alguien", "ayuda", "llamar"]
         usuario_quiere_humano = any(w in texto_actual.lower() for w in palabras_humano)
 
         if intent == "PASAR_ASESOR" or notify_asesor or usuario_quiere_humano:
             if not (texto_actual.lower().strip() in ["hola", "buen dia", "hey"]):
-                app.logger.info(f"🚀 TRANSFERENCIA: Pasando {numero} a asesor.")
-                from funciones_asesor import pasar_contacto_asesor
-                pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
                 
+                # --- CONSULTA REAL A TU BASE DE DATOS ---
+                from services import obtener_asesor_actual
+                asesor_asignado = obtener_asesor_actual(numero, config=config)
+
+                # Si NO tiene asesor asignado (o es la IA), entonces rotamos/asignamos
+                if not asesor_asignado or asesor_asignado.lower() == 'ia':
+                    app.logger.info(f"🚀 TRANSFERENCIA: Pasando {numero} a asesor nuevo.")
+                    from funciones_asesor import pasar_contacto_asesor
+                    pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
+                else:
+                    # Si YA tiene un asesor humano, NO llamamos a la función de rotación
+                    app.logger.info(f"📍 Respetando dueño: {numero} ya pertenece a {asesor_asignado}")
+                
+                # La IA responde de todos modos para dar seguimiento
                 from whatsapp import enviar_mensaje
                 enviar_mensaje(numero, mensaje_para_cliente, config)
                 
-                # Intentamos registrar antes de salir
+                # Registro en base de datos
                 try:
                     import app as main_app
                     main_app.registrar_respuesta_bot(numero, texto_actual, mensaje_para_cliente, config, incoming_saved=incoming_saved)
                 except: pass
+                
                 return True
 
         # 7. ENVÍO FINAL
