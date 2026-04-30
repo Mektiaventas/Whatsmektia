@@ -6551,6 +6551,7 @@ def obtener_siguiente_asesor(numero_cliente=None, config=None, texto_usuario="")
             app.logger.warning("⚠️ No hay asesores configurados")
             return None
         
+
         # --- 1. BUSCAR ASIGNACIÓN PERSISTENTE EXISTENTE ---
         if numero_cliente:
             conn = get_db_connection(config)
@@ -6560,6 +6561,19 @@ def obtener_siguiente_asesor(numero_cliente=None, config=None, texto_usuario="")
             
             if contacto and contacto.get('asesor_id'):
                 asesor_tel_existente = contacto['asesor_id'].strip()
+                
+                # --- NUEVA LÓGICA DE CONTROL ---
+                # Si el usuario NO está pidiendo un asesor explícitamente, 
+                # devolvemos None para que la IA (DeepSeek) pueda responder.
+                palabras_fuerza = ["asesor", "humano", "persona", "hablar con alguien", "ayuda", "llamar"]
+                quiere_humano = any(w in str(texto_usuario).lower() for w in palabras_fuerza)
+                
+                if not quiere_humano:
+                    app.logger.info(f"🤖 Cliente {numero_cliente} tiene asesor, pero seguimos con IA (no pidió humano).")
+                    cursor.close(); conn.close()
+                    return None  # <--- Esto permite que el flujo siga hacia DeepSeek
+                # -------------------------------
+
                 for asesor in asesores_list:
                     if (asesor.get('telefono') or '').strip() == asesor_tel_existente:
                         app.logger.info(f"✅ Persistencia: Cliente {numero_cliente} reenviado a asesor {asesor.get('nombre')}")
