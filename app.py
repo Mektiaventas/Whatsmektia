@@ -9442,39 +9442,39 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
         intent = (decision.get('intent') or "INFORMACION").upper()
         notify_asesor = bool(decision.get('notify_asesor'))
 
-        # 6. LÓGICA DE ASESOR (MODIFICADO CON FIDELIDAD REAL)
+        # 6. LÓGICA DE ASESOR (CORREGIDA Y CON REGISTRO DIRECTO)
         palabras_humano = ["asesor", "humano", "persona", "hablar con alguien", "ayuda", "llamar"]
         usuario_quiere_humano = any(w in texto_actual.lower() for w in palabras_humano)
 
         if intent == "PASAR_ASESOR" or notify_asesor or usuario_quiere_humano:
             if not (texto_actual.lower().strip() in ["hola", "buen dia", "hey"]):
                 
-                # --- CONSULTA REAL A TU BASE DE DATOS ---
                 from services import obtener_asesor_actual
                 asesor_asignado = obtener_asesor_actual(numero, config=config)
 
-                # Si NO tiene asesor asignado (o es la IA), entonces rotamos/asignamos
                 if not asesor_asignado or asesor_asignado.lower() == 'ia':
                     app.logger.info(f"🚀 TRANSFERENCIA: Pasando {numero} a asesor nuevo.")
                     from funciones_asesor import pasar_contacto_asesor
                     pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
                 else:
-                    # Si YA tiene un asesor humano, NO llamamos a la función de rotación
                     app.logger.info(f"📍 Respetando dueño: {numero} ya pertenece a {asesor_asignado}")
                 
-                # La IA responde de todos modos para dar seguimiento
                 from whatsapp import enviar_mensaje
                 enviar_mensaje(numero, mensaje_para_cliente, config)
                 
-                # Registro en base de datos
-                # Registro corregido para asegurar que se guarde en DB
+                # --- REGISTRO DIRECTO SIN IMPORTACIONES EXTERNAS ---
                 try:
-                    import sys
-                    reg_func = getattr(sys.modules['app'], 'registrar_respuesta_bot', None)
-                    if reg_func:
-                        reg_func(numero, texto_actual, mensaje_para_cliente, config, incoming_saved=incoming_saved)
+                    # Llamamos directamente a la función que ya reside en este archivo
+                    registrar_respuesta_bot(
+                        numero=numero, 
+                        mensaje=texto_actual, 
+                        respuesta=mensaje_para_cliente, 
+                        config=config, 
+                        incoming_saved=incoming_saved
+                    )
+                    app.logger.info(f"✅ Respuesta registrada en DB para {numero}")
                 except Exception as e:
-                    app.logger.warning(f"⚠️ Error al registrar en bloque de transferencia: {e}")
+                    app.logger.error(f"❌ Error al registrar respuesta en bloque asesor: {e}")
                 
                 return True
 
