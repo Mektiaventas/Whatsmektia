@@ -9453,10 +9453,14 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
                 enviar_mensaje(numero, mensaje_para_cliente, config)
                 
                 # Registro en base de datos
+                # Registro corregido para asegurar que se guarde en DB
                 try:
-                    import app as main_app
-                    main_app.registrar_respuesta_bot(numero, texto_actual, mensaje_para_cliente, config, incoming_saved=incoming_saved)
-                except: pass
+                    import sys
+                    reg_func = getattr(sys.modules['app'], 'registrar_respuesta_bot', None)
+                    if reg_func:
+                        reg_func(numero, texto_actual, mensaje_para_cliente, config, incoming_saved=incoming_saved)
+                except Exception as e:
+                    app.logger.warning(f"⚠️ Error al registrar en bloque de transferencia: {e}")
                 
                 return True
 
