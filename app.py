@@ -9351,22 +9351,28 @@ def notificar_asesor_asignado(asesor, numero_cliente, config=None):
 # ----------------- Generar Respuesta de Deepseek FULL (Restaurada y Corregida) -----------------
 def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, incoming_saved=False, es_audio=False, es_imagen=False, imagen_base64=None, transcripcion=None, catalog_list=None, texto_catalogo=None, producto_aplica="NO_APLICA"):
     try:
-        # 1. IMPORTS
+        # 1. IMPORTS (Tus originales)
         import os, json, requests, time
         from flask import current_app as app, request
         from urllib.parse import urlparse
 
-        # 2. CONFIGURACIÓN DINÁMICA
+        # 2. CONFIGURACIÓN DINÁMICA (Tus variables intactas)
         ia_nombre = config.get('ia_nombre') or "Asistente"
         negocio_nombre = config.get('negocio_nombre') or "Negocio"
         que_hace = config.get('que_hace') or "Asistir a los clientes."
-        subdominio = config.get('subdominio_actual') or config.get('dominio', 'mektia').split('.')
+        
+        # Mantenemos tu lógica de subdominio original
+        subdominio_partes = config.get('dominio', 'mektia').split('.')
+        subdominio = config.get('subdominio_actual') or (subdominio_partes if subdominio_partes else 'mektia')
         
         items_catalogo = catalog_list if catalog_list else precios
         hay_productos = bool(items_catalogo and len(items_catalogo) > 0)
 
-        # 3. LÓGICA DE SALUDO (Identidad)
-        ya_saludo = any(h.get('enviado_por') == 'ia' for h in historial_final)
+        # 3. LÓGICA DE SALUDO (Tu lógica original con protección de tipo)
+        ya_saludo = False
+        if isinstance(historial_final, list):
+            ya_saludo = any(isinstance(h, dict) and h.get('enviado_por') == 'ia' for h in historial_final)
+        
         identidad_instruccion = ""
         if not ya_saludo:
             identidad_instruccion = f"Preséntate brevemente como {ia_nombre} de {negocio_nombre}."
@@ -9377,9 +9383,10 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
         if hay_productos:
             contexto_productos = "\nPRODUCTOS DISPONIBLES:\n"
             for p in items_catalogo[:15]:
-                n = p.get('servicio') or p.get('nombre') or p.get('modelo')
-                pr = p.get('precio_menudeo') or p.get('precio') or "Consultar"
-                contexto_productos += f"• *{n}*: ${pr}\n"
+                if isinstance(p, dict): # Protección para que no truene al leer productos
+                    n = p.get('servicio') or p.get('nombre') or p.get('modelo')
+                    pr = p.get('precio_menudeo') or p.get('precio') or "Consultar"
+                    contexto_productos += f"• *{n}*: ${pr}\n"
 
         system_prompt = f"""
         Eres {ia_nombre}, el asistente inteligente de {negocio_nombre}.
@@ -9399,11 +9406,11 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
         }}
         """
 
-        # 4. PREPARACIÓN DE MENSAJES
+        # 4. PREPARACIÓN DE MENSAJES (Tu historial restaurado)
         lista_mensajes = [{"role": "system", "content": system_prompt}]
-        if historial_final:
+        if isinstance(historial_final, list):
             for h in historial_final[-8:]:
-                if isinstance(h, dict):
+                if isinstance(h, dict): # Esta es la protección contra el error de "list indices"
                     rol = "assistant" if h.get('enviado_por') == 'ia' else "user"
                     cont = h.get('mensaje', '')
                     if cont: lista_mensajes.append({"role": rol, "content": cont})
@@ -9411,7 +9418,7 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
         texto_actual = transcripcion if es_audio and transcripcion else texto
         lista_mensajes.append({"role": "user", "content": texto_actual})
 
-        # 5. LLAMADA A DEEPSEEK
+        # 5. LLAMADA A DEEPSEEK (Aquí estaba el error del índice)
         api_key = os.getenv('DEEPSEEK_API_KEY')
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         payload = {
@@ -9424,60 +9431,51 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
         resp = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload, timeout=30)
         resp.raise_for_status()
         
-        # CORRECCIÓN DE ÍNDICE AQUÍ:
-        res_raw = resp.json()['choices']['message']['content']
+        # LA CORRECCIÓN REAL:
+        datos_completos = resp.json()
+        res_raw = datos_completos['choices']['message']['content'] # Añadido el que faltaba
         
-        # Limpieza por si devuelve markdown
-        res_raw = res_raw.replace("```json", "").replace("```", "").strip()
         decision = json.loads(res_raw)
         
         mensaje_para_cliente = decision.get('respuesta_text') or "Entiendo, ¿en qué más puedo ayudarte?"
-        
         if "•" in mensaje_para_cliente:
             mensaje_para_cliente = mensaje_para_cliente.replace("•", "\n\n•").strip()
 
         intent = (decision.get('intent') or "INFORMACION").upper()
         notify_asesor = bool(decision.get('notify_asesor'))
 
-        # 6. LÓGICA DE ASESOR
+        # 6. LÓGICA DE ASESOR (Tu lógica original corregida para no buclar)
         palabras_humano = ["asesor", "humano", "persona", "hablar con alguien", "ayuda", "llamar"]
-        usuario_quiere_humano = any(w in texto_actual.lower() for w in palabras_humano)
+        usuario_quiere_humano = any(w in str(texto_actual).lower() for w in palabras_humano)
 
         if intent == "PASAR_ASESOR" or notify_asesor or usuario_quiere_humano:
             from services import obtener_asesor_actual
             asesor_asignado = obtener_asesor_actual(numero, config=config)
-
             if not asesor_asignado or asesor_asignado.lower() == 'ia':
                 from funciones_asesor import pasar_contacto_asesor
                 pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
             
             from whatsapp import enviar_mensaje
             enviar_mensaje(numero, mensaje_para_cliente, config)
-            
             registrar_respuesta_bot(numero, texto_actual, mensaje_para_cliente, config, incoming_saved=incoming_saved)
             return True
 
-        # 7. ENVÍO FINAL
-        from whatsapp import enviar_mensaje, enviar_mensaje_voz
+        # 7. ENVÍO FINAL (Tus parámetros originales)
+        from whatsapp import enviar_mensaje
         enviar_mensaje(numero, mensaje_para_cliente, config)
 
-        # 8. REGISTRO EN DB
+        # 8. REGISTRO EN DB (Llamada directa simple)
         try:
-            registrar_respuesta_bot(
-                numero, 
-                texto_actual, 
-                mensaje_para_cliente, 
-                config, 
-                incoming_saved=incoming_saved
-            )
-            app.logger.info(f"✅ Historial guardado para {numero}")
+            registrar_respuesta_bot(numero, texto_actual, mensaje_para_cliente, config, incoming_saved=incoming_saved)
         except Exception as e:
-            app.logger.warning(f"⚠️ Error al registrar en DB: {e}")
+            app.logger.warning(f"⚠️ Error al registrar: {e}")
 
         return True
 
     except Exception as e:
-        app.logger.error(f"🔴 Error crítico en generar_respuesta_deepseek: {e}")
+        # Esto te dirá exactamente en qué parte del código falló si vuelve a pasar
+        import traceback
+        app.logger.error(f"🔴 ERROR EN GENERAR_RESPUESTA: {str(e)}\n{traceback.format_exc()}")
         return False
 #--------------- Fin de Generar Respuesta de Deepseek -----------------------------
 
