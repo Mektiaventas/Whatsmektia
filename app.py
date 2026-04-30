@@ -9427,6 +9427,7 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
         datos_completos = resp.json()
         
         # --- LÍNEA CORREGIDA (9437) ---
+        print("🚀 ESTA ES LA VERSION CORREGIDA CON EL CERO")
         res_raw = datos_completos['choices']['message']['content']
         
         decision = json.loads(res_raw)
