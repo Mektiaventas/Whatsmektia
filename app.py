@@ -10178,6 +10178,13 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
         resp_ds.raise_for_status()
         ds_data = resp_ds.json()
         raw_ds = (ds_data['choices'][0]['message']['content'] or "").strip()
+        
+        # --- PARCHE PARA MODO SIMULACIÓN ---
+        if "simulacion" in (texto or "").lower():
+            app.logger.info("🎮 MODO SIMULACIÓN DETECTADO: Saltando búsqueda en BD.")
+            generar_respuesta_deepseek(numero=numero, texto=texto, precios=[], historial_final=historial_final, config=config, incoming_saved=incoming_saved, es_audio=es_audio)
+            return True
+        # -----------------------------------
 
         if "SEARCH:" in raw_ds:
             producto_aplica = "SI_APLICA"
