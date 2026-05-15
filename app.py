@@ -10126,35 +10126,43 @@ EJEMPLOS:
         
 def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_final=None):
     """
-    Versión CORREGIDA: Detecta simulaciones tanto por palabra clave 
-    como por contexto de la IA en el historial.
+    Versión INTEGRAL: 
+    Incluye lógica de simulación, corrección de errores de lista y el bloque completo de fichas.
     """
     if historial_final is None:
         historial_final = []
         
+    texto_usuario = (texto or "").lower()
+
+    # --- 1. DETECCIÓN PRIORITARIA (Keywords) ---
+    if "simulacion" in texto_usuario or "simulación" in texto_usuario:
+        app.logger.info(f"🎮 [SIMULACIÓN] Detectada por palabra clave.")
+        generar_respuesta_deepseek(numero=numero, texto=texto, precios=[], historial_final=historial_final, config=config, incoming_saved=incoming_saved, es_audio=es_audio)
+        return True
+
     try:
         producto_aplica = "NO_APLICA"
         contexto_busqueda = texto 
         contexto_ia_final = "SI_APLICA"
         solicita_imagen_ia = False 
 
-        app.logger.info(f"🔎 Analizando intención con DeepSeek (Modo Fichas) usando historial inyectado...")
+        app.logger.info(f"🔎 Analizando intención con DeepSeek (Modo Fichas) para {numero}...")
         
         historial_text = ""
-        for h in historial_final[-5:]:  
+        for h in historial_final[-5:]: 
             msg_h = h.get('mensaje') or ""
             resp_h = h.get('respuesta') or ""
             if msg_h: historial_text += f"U: {msg_h}\n"
             if resp_h: historial_text += f"A: {resp_h}\n"
 
         ds_prompt = (
-            "Eres un vendedor experto. Tu misión es entender QUÉ busca el usuario basándote en el HISTORIAL y su MENSAJE ACTUAL.\n"
-            "Instrucciones estrictas de respuesta (Responde SOLO con la etiqueta correspondiente):\n"
-            "1. Si el usuario está hablando, solicitando, interactuando o respondiendo 'sí/no' a una SIMULACIÓN de crédito/financiera/sistema, responde: MODO_SIMULACION\n"
-            "2. Si el usuario busca un producto o catálogo, responde: SEARCH: <término preciso>\n"
-            "3. Si la intención implica VER/RECIBIR el producto, agrega: | SHOW: YES\n"
-            "4. Si el usuario pide hablar con un asesor, humano o persona, responde: TRANSFERIR_ASESOR\n"
-            "5. Si el usuario quiere agendar una cita, responde: AGENDAR_CITA.\n\n"
+            "Eres un vendedor experto. Tu misión es clasificar la intención del usuario.\n"
+            "Instrucciones:\n"
+            "1. Si responde a una SIMULACIÓN financiera o de crédito, responde: MODO_SIMULACION\n"
+            "2. Si busca un producto, responde: SEARCH: <término preciso>\n"
+            "3. Si la intención implica VER el producto, agrega: | SHOW: YES\n"
+            "4. Si pide hablar con un asesor, responde: TRANSFERIR_ASESOR\n"
+            "5. Si quiere agendar cita, responde: AGENDAR_CITA.\n\n"
             "HISTORIAL:\n"
             f"{historial_text.strip()}\n\n"
             "MENSAJE ACTUAL:\n"
@@ -10172,16 +10180,21 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
         resp_ds = requests.post(DEEPSEEK_API_URL, headers=headers_ds, json=payload_ds, timeout=8)
         resp_ds.raise_for_status()
         ds_data = resp_ds.json()
-        raw_ds = (ds_data['choices']['message']['content'] or "").strip()
+
+        # --- 2. LECTURA SEGURA (Evita el error de 'list indices') ---
+        raw_ds = ""
+        if 'choices' in ds_data and len(ds_data['choices']) > 0:
+            raw_ds = (ds_data['choices']['message']['content'] or "").strip()
         
-        # --- PARCHE PARA MODO SIMULACIÓN MEJORADO ---
-        # Ahora se activa si dice "simulación" O si DeepSeek detecta que el "Si" pertenece a la simulación.
-        if "MODO_SIMULACION" in raw_ds.upper() or "simulacion" in (texto or "").lower():
-            app.logger.info("🎮 MODO SIMULACIÓN DETECTADO CORRECTAMENTE: Procesando con DeepSeek General.")
+        # --- 3. EVALUACIÓN DE INTENCIONES ---
+        
+        # Caso Simulación
+        if "MODO_SIMULACION" in raw_ds.upper():
+            app.logger.info("🎮 [SIMULACIÓN] Detectada por contexto de IA.")
             generar_respuesta_deepseek(numero=numero, texto=texto, precios=[], historial_final=historial_final, config=config, incoming_saved=incoming_saved, es_audio=es_audio)
             return True
-        # -------------------------------------------
 
+        # Caso Búsqueda de Productos
         if "SEARCH:" in raw_ds:
             producto_aplica = "SI_APLICA"
             try:
@@ -10190,19 +10203,19 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
                     solicita_imagen_ia = True
                 contexto_busqueda = rest.split('|').strip().strip('"').strip("'")
             except IndexError: pass
+            
         elif "AGENDAR_CITA" in raw_ds.upper():
             save_cita_inicial = {'servicio_solicitado': contexto_busqueda, 'telefono': numero}
             manejar_guardado_cita_unificado(save_cita=save_cita_inicial, intent="AGENDAR_CITA", numero=numero, texto=texto, historial_final=historial_final, catalog_list=[], respuesta_text=None, incoming_saved=incoming_saved, config=config)
             return True
+            
         elif "TRANSFERIR_ASESOR" in raw_ds.upper():
             fue_transferido = pasar_contacto_asesor(numero, config=config, notificar_asesor=True, historial_final=historial_final)
-            if fue_transferido:
-                app.logger.info(f"✅ Transferencia ejecutada para {numero}. Se omitió mensaje duplicado.")
-                return True
+            if fue_transferido: return True
             else:
-                app.logger.info(f"🔄 Redirigiendo saludo a respuesta de texto normal de la IA para {numero}")
                 generar_respuesta_deepseek(numero=numero, texto=texto, precios=[], historial_final=historial_final, config=config, incoming_saved=incoming_saved, es_audio=es_audio)
                 return True
+        
         elif "SI_APLICA" in raw_ds:
             producto_aplica = "SI_APLICA"
 
@@ -10211,7 +10224,7 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
         if any(kw in (texto or "").lower() for kw in ['precio', 'foto', 'ver']):
             producto_aplica = "SI_APLICA"
 
-    # --- Lógica de Búsqueda de Productos (Sigue igual...) ---
+    # --- 4. LÓGICA DE BÚSQUEDA Y ENVÍO DE FICHAS (LAS 40 LINEAS) ---
     precios = [] 
     productos_para_ficha = [] 
 
@@ -10230,11 +10243,12 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
             else:
                 productos_para_ficha = precios[:3]
 
+    # Si no hay productos, delegar a respuesta normal
     if not productos_para_ficha:
         generar_respuesta_deepseek(numero=numero, texto=texto, precios=precios, historial_final=historial_final, config=config, incoming_saved=incoming_saved, es_audio=es_audio)
         return True
 
-    # --- Envío de Fichas (Sigue igual...) ---
+    # Bloque Unificado de envío (Imagen + Texto)
     for p in productos_para_ficha:
         img_url = p.get('imagen')
         sku_p = p.get('sku', '') or 'S/N'
