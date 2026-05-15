@@ -9506,7 +9506,41 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         historial_final = []
     else:
         print(f"DEBUG: Usando historial_final inyectado con {len(historial_final)} registros")
+        
+    # 1.5. --- CARGA ÚNICA DE HISTORIAL (YA INYECTADO) ---
+    if historial_final is None:
+        print(f"DEBUG: historial_final llegó None, inicializando vacío para {numero}")
+        historial_final = []
+    else:
+        print(f"DEBUG: Usando historial_final inyectado con {len(historial_final)} registros")
     
+    # =========================================================================
+    # 🎮 🎯 [DISPARADORES MAESTROS FUERA DE FICHAS]
+    # =========================================================================
+    texto_usuario_control = (texto or "").lower().strip()
+
+    # DISPARADOR 1: Modo Simulación / Pruebas
+    if any(kw in texto_usuario_control for kw in ["simulacion", "simulación", "simulemos"]):
+        app.logger.info(f"🎮 [DISPARADOR 1] Interceptado flujo de simulación para {numero}")
+        generar_respuesta_deepseek(
+            numero=numero, 
+            texto=texto, 
+            precios=[], 
+            historial_final=historial_final, 
+            config=config, 
+            incoming_saved=incoming_saved, 
+            es_audio=es_audio
+        )
+        return True # <-- CORTA EL FLUJO AQUÍ (No entra a Fichas ni a nada más)
+
+    # DISPARADOR 2: Forzar actualización o comando de control específico
+    elif "actualizar catalogo" in texto_usuario_control or "actualizar catálogo" in texto_usuario_control:
+        app.logger.info(f"⚙️ [DISPARADOR 2] Interceptado comando de actualización manual para {numero}")
+        # Aquí pones la lógica o función que deba ejecutarse para este segundo disparador
+        enviar_mensaje(numero, "🔄 Entendido, procedo a recargar la base de datos del catálogo...", config)
+        return True # <-- CORTA EL FLUJO AQUÍ
+    # =========================================================================
+                                   
     # 2. --- VÍA RÁPIDA DE CONTACTO (INTERCEPCIÓN TEMPRANA) ---
     texto_norm = (texto or "").strip().lower()
     
