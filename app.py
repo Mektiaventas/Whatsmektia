@@ -9648,9 +9648,17 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         # INICIO DEL BLOQUE - IA TOTAL CON FORMATO "FICHA DE PRODUCTO"
         # ================================================================
         # Inyectamos historial_final en fichas_ia_total
-        if fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_final=historial_final):
-            app.logger.info(f"✅ Fichas enviadas, cerramos flujo para {numero}")
-            return True
+        #if fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_final=historial_final):
+        #    app.logger.info(f"✅ Fichas enviadas, cerramos flujo para {numero}")
+        #    return True
+        # ================================================================
+        # ================================================================
+        # 🛠️ INSERTA ESTAS LÍNEAS AQUÍ PARA REPARAR LAS VARIABLES DEFECTUOSAS
+        # ================================================================
+        # Nota: Busca en tu código cómo se llama tu función para traer los productos. 
+        # Si no la encuentras rápido, deja temporalmente 'precios = []' para probar que no truene.
+        precios = obtener_datos_de_precios_o_catalogo(config) or [] 
+        producto_aplica = "SI_APLICA" 
         # ================================================================
         
         texto_catalogo = build_texto_catalogo(precios, limit=40)
