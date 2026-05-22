@@ -9742,7 +9742,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         # --- System prompt (ACTUALIZADO PARA CONTEXTO DE INTERÉS) ---
         # --- LÓGICA DE MEMORIA PARA EVITAR REPETICIONES ---
         # Analizamos si la IA ya respondió antes para que no se vuelva a presentar
-        ia_ya_respondio = any(m.get('role') == 'assistant' for m in historial)
+        ia_ya_respondio = any(m.get('role') == 'assistant' for m in historial_final)
         # Si ya respondió, limpiamos la identidad para que no la repita
         identidad_dinamica = f'Tu nombre es "{ia_nombre}" y el negocio se llama "{negocio_nombre}".' if not ia_ya_respondio else "Ya te presentaste. NO repitas tu nombre."
         info_negocio_dinamica = f'Descripción: {negocio_descripcion_short} | Rol: {negocio_que_hace_short}' if not ia_ya_respondio else "Responde directo a la duda sin dar descripciones del negocio."
