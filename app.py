@@ -10160,19 +10160,14 @@ EJEMPLOS:
         
 def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_final=None):
     """
-    Versión INTEGRAL: 
-    Incluye lógica de simulación, corrección de errores de lista y el bloque completo de fichas.
+    Versión LIMPIA Y CORREGIDA: Se eliminaron los parches de simulación.
+    Su única función es clasificar (SEARCH, CITA, ASESOR), buscar en la BD 
+    y enviar un formato estructurado de hasta 3 fichas relacionales.
     """
     if historial_final is None:
         historial_final = []
         
     texto_usuario = (texto or "").lower()
-
-    # --- 1. DETECCIÓN PRIORITARIA (Keywords) ---
-    if "simulacion" in texto_usuario or "simulación" in texto_usuario:
-        app.logger.info(f"🎮 [SIMULACIÓN] Detectada por palabra clave.")
-        generar_respuesta_deepseek(numero=numero, texto=texto, precios=[], historial_final=historial_final, config=config, incoming_saved=incoming_saved, es_audio=es_audio)
-        return True
 
     try:
         producto_aplica = "NO_APLICA"
@@ -10192,11 +10187,10 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
         ds_prompt = (
             "Eres un vendedor experto. Tu misión es clasificar la intención del usuario.\n"
             "Instrucciones:\n"
-            "1. Si responde a una SIMULACIÓN financiera o de crédito, responde: MODO_SIMULACION\n"
-            "2. Si busca un producto, responde: SEARCH: <término preciso>\n"
-            "3. Si la intención implica VER el producto, agrega: | SHOW: YES\n"
-            "4. Si pide hablar con un asesor, responde: TRANSFERIR_ASESOR\n"
-            "5. Si quiere agendar cita, responde: AGENDAR_CITA.\n\n"
+            "1. Si busca un producto, responde: SEARCH: <término preciso>\n"
+            "2. Si la intención implica VER el producto, agrega: | SHOW: YES\n"
+            "3. Si pide hablar con un asesor, responde: TRANSFERIR_ASESOR\n"
+            "4. Si quiere agendar cita, responde: AGENDAR_CITA.\n\n"
             "HISTORIAL:\n"
             f"{historial_text.strip()}\n\n"
             "MENSAJE ACTUAL:\n"
@@ -10215,26 +10209,20 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
         resp_ds.raise_for_status()
         ds_data = resp_ds.json()
 
-        # --- 2. LECTURA SEGURA (Evita el error de 'list indices') ---
+        # --- 2. LECTURA SEGURA (Corrección del error 'list indices must be integers') ---
         raw_ds = ""
         if 'choices' in ds_data and len(ds_data['choices']) > 0:
             raw_ds = (ds_data['choices']['message']['content'] or "").strip()
         
-        # --- 3. EVALUACIÓN DE INTENCIONES ---
-        
-        # Caso Simulación
-        if "MODO_SIMULACION" in raw_ds.upper():
-            app.logger.info("🎮 [SIMULACIÓN] Detectada por contexto de IA.")
-            generar_respuesta_deepseek(numero=numero, texto=texto, precios=[], historial_final=historial_final, config=config, incoming_saved=incoming_saved, es_audio=es_audio)
-            return True
-
-        # Caso Búsqueda de Productos
+        # --- 3. EVALUACIÓN DE INTENCIONES (Sin parches de simulación) ---
         if "SEARCH:" in raw_ds:
             producto_aplica = "SI_APLICA"
             try:
+                # Corregido: .split() devuelve lista, necesitamos acceder al índice antes de hacer .strip()
                 rest = raw_ds.split("SEARCH:", 1).strip()
                 if "SHOW: YES" in rest or "SHOW:YES" in rest:
                     solicita_imagen_ia = True
+                # Corregido: .split('|') devuelve lista, necesitamos acceder al índice antes de los .strip()
                 contexto_busqueda = rest.split('|').strip().strip('"').strip("'")
             except IndexError: pass
             
@@ -10254,11 +10242,11 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
             producto_aplica = "SI_APLICA"
 
     except Exception as e:
-        app.logger.warning(f"⚠️ DeepSeek error: {e}")
+        app.logger.warning(f"⚠️ DeepSeek error interno en Modo Fichas: {e}")
         if any(kw in (texto or "").lower() for kw in ['precio', 'foto', 'ver']):
             producto_aplica = "SI_APLICA"
 
-    # --- 4. LÓGICA DE BÚSQUEDA Y ENVÍO DE FICHAS (LAS 40 LINEAS) ---
+    # --- 4. LÓGICA DE BÚSQUEDA Y ENVÍO DE FICHAS (MÁXIMO 3) ---
     precios = [] 
     productos_para_ficha = [] 
 
@@ -10275,14 +10263,14 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
             if match_sku:
                 productos_para_ficha = match_sku[:1]
             else:
-                productos_para_ficha = precios[:3]
+                productos_para_ficha = precios[:3] # Aquí se limita a los 3 más relacionados
 
-    # Si no hay productos, delegar a respuesta normal
+    # Si no hay productos, delegar a respuesta normal (No interrumpe el flujo general)
     if not productos_para_ficha:
         generar_respuesta_deepseek(numero=numero, texto=texto, precios=precios, historial_final=historial_final, config=config, incoming_saved=incoming_saved, es_audio=es_audio)
         return True
 
-    # Bloque Unificado de envío (Imagen + Texto)
+    # Bloque Unificado de envío (Imagen + Texto estructurado en orden)
     for p in productos_para_ficha:
         img_url = p.get('imagen')
         sku_p = p.get('sku', '') or 'S/N'
