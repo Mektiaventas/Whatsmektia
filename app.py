@@ -9841,13 +9841,17 @@ EJEMPLOS:
             app.logger.info("🔎 producto_aplica=NO_APLICA -> omitting full catalog from DeepSeek payload")
             
         # --- Llamada a DeepSeek y parseo (SIN CAMBIOS) ---
+        # 🛠️ Reparación para objetos datetime (fechas) de la Base de Datos
+        from datetime import datetime
+        json_fallback = lambda obj: obj.isoformat() if isinstance(obj, (datetime, datetime.date)) else str(obj)
+
         payload_messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": json.dumps(user_content, ensure_ascii=False)}
+            {"role": "user", "content": json.dumps(user_content, ensure_ascii=False, default=json_fallback)}
         ]
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
         payload = {"model": "deepseek-chat", "messages": payload_messages, "temperature": 0.2, "max_tokens": 800}
-
+        
         resp = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
         resp.raise_for_status()
         data = resp.json()
