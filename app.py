@@ -10044,7 +10044,7 @@ EJEMPLOS:
             else:
                 app.logger.warning(f"⚠️ Falló la acción de pasar a asesor para {numero}.")
             # REGISTRAMOS EN BASE DE DATOS    
-            registrar_respuesta_bot(numero, texto, mensaje_respuesta_final, config, incoming_saved=incoming_saved)
+            registrar_respuesta_bot(numero, texto, respuesta_text or "Conversación asignada a un asesor.", config, incoming_saved=incoming_saved)
             app.logger.info(f"✅ Alerta enviada y cliente notificado.")
             return True
         if intent == "DATOS_TRANSFERENCIA":
