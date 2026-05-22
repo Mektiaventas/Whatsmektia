@@ -9657,7 +9657,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         # ================================================================
         # Nota: Busca en tu código cómo se llama tu función para traer los productos. 
         # Si no la encuentras rápido, deja temporalmente 'precios = []' para probar que no truene.
-        precios = obtener_datos_de_precios_o_catalogo(config) or [] 
+        precios = obtener_todos_los_precios(config) or [] 
         producto_aplica = "SI_APLICA" 
         # ================================================================
         
