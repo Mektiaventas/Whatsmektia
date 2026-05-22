@@ -10160,9 +10160,8 @@ EJEMPLOS:
         
 def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_final=None):
     """
-    Versión LIMPIA Y CORREGIDA: Se eliminaron los parches de simulación.
-    Su única función es clasificar (SEARCH, CITA, ASESOR), buscar en la BD 
-    y enviar un formato estructurado de hasta 3 fichas relacionales.
+    Versión ULTRA-SEGURA: Corrección definitiva del error de índices de lista.
+    Mantiene el Modo Fichas intacto (analiza intención, busca productos y envía hasta 3 fichas).
     """
     if historial_final is None:
         historial_final = []
@@ -10179,10 +10178,11 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
         
         historial_text = ""
         for h in historial_final[-5:]: 
-            msg_h = h.get('mensaje') or ""
-            resp_h = h.get('respuesta') or ""
-            if msg_h: historial_text += f"U: {msg_h}\n"
-            if resp_h: historial_text += f"A: {resp_h}\n"
+            if isinstance(h, dict):
+                msg_h = h.get('mensaje') or ""
+                resp_h = h.get('respuesta') or ""
+                if msg_h: historial_text += f"U: {msg_h}\n"
+                if resp_h: historial_text += f"A: {resp_h}\n"
 
         ds_prompt = (
             "Eres un vendedor experto. Tu misión es clasificar la intención del usuario.\n"
@@ -10209,20 +10209,27 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
         resp_ds.raise_for_status()
         ds_data = resp_ds.json()
 
-        # --- 2. LECTURA SEGURA (Corrección del error 'list indices must be integers') ---
+        # --- 2. LECTURA ULTRA SEGURA (Evita 'list indices must be integers') ---
         raw_ds = ""
-        if 'choices' in ds_data and len(ds_data['choices']) > 0:
-            raw_ds = (ds_data['choices']['message']['content'] or "").strip()
+        # Imprimimos la respuesta en tus logs para auditar exactamente qué responde la API
+        app.logger.info(f"📦 [DEEPSEEK RESPONSE] {ds_data}")
+
+        if isinstance(ds_data, dict) and 'choices' in ds_data:
+            choices = ds_data['choices']
+            if isinstance(choices, list) and len(choices) > 0:
+                first_choice = choices
+                if isinstance(first_choice, dict):
+                    message_dict = first_choice.get('message')
+                    if isinstance(message_dict, dict):
+                        raw_ds = (message_dict.get('content') or "").strip()
         
-        # --- 3. EVALUACIÓN DE INTENCIONES (Sin parches de simulación) ---
+        # --- 3. EVALUACIÓN DE INTENCIONES ---
         if "SEARCH:" in raw_ds:
             producto_aplica = "SI_APLICA"
             try:
-                # Corregido: .split() devuelve lista, necesitamos acceder al índice antes de hacer .strip()
                 rest = raw_ds.split("SEARCH:", 1).strip()
                 if "SHOW: YES" in rest or "SHOW:YES" in rest:
                     solicita_imagen_ia = True
-                # Corregido: .split('|') devuelve lista, necesitamos acceder al índice antes de los .strip()
                 contexto_busqueda = rest.split('|').strip().strip('"').strip("'")
             except IndexError: pass
             
@@ -10246,7 +10253,7 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
         if any(kw in (texto or "").lower() for kw in ['precio', 'foto', 'ver']):
             producto_aplica = "SI_APLICA"
 
-    # --- 4. LÓGICA DE BÚSQUEDA Y ENVÍO DE FICHAS (MÁXIMO 3) ---
+    # --- 4. LÓGICA DE BÚSQUEDA Y ENVÍO DE FICHAS ---
     precios = [] 
     productos_para_ficha = [] 
 
@@ -10263,14 +10270,14 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
             if match_sku:
                 productos_para_ficha = match_sku[:1]
             else:
-                productos_para_ficha = precios[:3] # Aquí se limita a los 3 más relacionados
+                productos_para_ficha = precios[:3]
 
-    # Si no hay productos, delegar a respuesta normal (No interrumpe el flujo general)
+    # Si no hay productos, delegar a respuesta normal de la IA (No interrumpe simulaciones externas)
     if not productos_para_ficha:
         generar_respuesta_deepseek(numero=numero, texto=texto, precios=precios, historial_final=historial_final, config=config, incoming_saved=incoming_saved, es_audio=es_audio)
         return True
 
-    # Bloque Unificado de envío (Imagen + Texto estructurado en orden)
+    # Bloque Unificado de envío (Imagen + Texto)
     for p in productos_para_ficha:
         img_url = p.get('imagen')
         sku_p = p.get('sku', '') or 'S/N'
