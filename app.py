@@ -10065,6 +10065,26 @@ EJEMPLOS:
                 app.logger.info(f"ℹ️ enviar_datos_transferencia devolvió sent={sent}, omitiendo respuesta_text redundante.")
             return True
 
+        # =====================================================================
+        # 📸 REINTEGRACIÓN INTELIGENTE DE FICHAS IA VISUALES (CON IMÁGENES)
+        # =====================================================================
+        # Si el usuario pregunta por precios, pide ver fotos, imágenes, etc.
+        palabras_clave_visuales = ['precio', 'foto', 'ver', 'imagen', 'ofreces', 'catalogo', 'cursos', 'talleres']
+        if any(kw in (texto or "").lower() for kw in palabras_clave_visuales):
+            app.logger.info(f"📸 Activando Fichas IA Visuales para {numero}")
+            fichas_enviadas = fichas_ia_total(
+                numero=numero, 
+                texto=texto, 
+                es_audio=es_audio, 
+                config=config, 
+                incoming_saved=incoming_saved, 
+                historial_final=historial_final
+            )
+            if fichas_enviadas:
+                app.logger.info(f"✅ Fichas visuales ejecutadas y enviadas con éxito para {numero}")
+                return True
+        # =====================================================================
+
         # RESPUESTA TEXTUAL (Y DE AUDIO) POR DEFECTO
         if respuesta_text:
             respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
