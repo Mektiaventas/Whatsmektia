@@ -1,4 +1,4 @@
-﻿# (entire file replaced, only enviar_imagen modified to build public URLs from filename
+# (entire file replaced, only enviar_imagen modified to build public URLs from filename
 #  instead of searching tenant-local filesystem or uploading local files)
 import os
 import time
@@ -356,9 +356,13 @@ def enviar_imagen(numero, image_url, texto=None, config=None):
         dominio = cfg.get('dominio', 'unilova.mektia.com')
         base_url = f"https://{dominio}" if not dominio.startswith('http') else dominio
         
-        # Obtenemos el nombre de la carpeta del cliente (ej: unilova)
-        # Si no viene en la config, usamos el que vimos en tu 'ls'
-        cliente_folder = cfg.get('bd_name', 'unilova')
+        # Derivamos la carpeta del cliente desde subdominio o dominio
+        cliente_folder = (
+            cfg.get('subdominio')
+            or cfg.get('bd_name')
+            or cfg.get('dominio', '').split('.')[0]
+            or 'default'
+        )
         
         # Limpieza y extracción del nombre del archivo
         if not image_url or not str(image_url).strip():
