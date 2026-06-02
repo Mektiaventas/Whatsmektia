@@ -10275,7 +10275,7 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
         if isinstance(ds_data, dict) and 'choices' in ds_data:
             choices = ds_data['choices']
             if isinstance(choices, list) and len(choices) > 0:
-                first_choice = choices
+                first_choice = choices[0]
                 if isinstance(first_choice, dict):
                     message_dict = first_choice.get('message')
                     if isinstance(message_dict, dict):
@@ -10285,10 +10285,11 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
         if "SEARCH:" in raw_ds:
             producto_aplica = "SI_APLICA"
             try:
-                rest = raw_ds.split("SEARCH:", 1).strip()
+                parts = raw_ds.split("SEARCH:", 1)
+                rest = parts[1].strip() if len(parts) > 1 else ""  # FIX: split() devuelve lista, no string
                 if "SHOW: YES" in rest or "SHOW:YES" in rest:
                     solicita_imagen_ia = True
-                contexto_busqueda = rest.split('|').strip().strip('"').strip("'")
+                contexto_busqueda = rest.split('|')[0].strip().strip('"').strip("'")  # FIX: misma corrección
             except IndexError: pass
             
         elif "AGENDAR_CITA" in raw_ds.upper():
