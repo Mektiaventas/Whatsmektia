@@ -5102,74 +5102,93 @@ def ver_citas(config=None):
 def load_config(config=None):
     if config is None:
         config = obtener_configuracion_por_host()
-    conn = get_db_connection(config)
-    cursor = conn.cursor(dictionary=True)
-    
-    # 1. Ejecutar CREATE TABLE y CONSUMIR resultados (si los hubiera)
+        
+    conn = None
+    cursor = None
+    row = None
+
     try:
-        # Nota: La lista de columnas aquí DEBE coincidir con la lista en save_config
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS configuracion (
-                id INT PRIMARY KEY DEFAULT 1,
-                ia_nombre VARCHAR(100),
-                negocio_nombre VARCHAR(100),
-                descripcion TEXT,
-                url VARCHAR(255),
-                direccion VARCHAR(255),
-                telefono VARCHAR(50),
-                correo VARCHAR(100),
-                que_hace TEXT,
-                tono VARCHAR(50),
-                lenguaje VARCHAR(50),
-                contexto_adicional TEXT,
-                restricciones TEXT,
-                palabras_prohibidas TEXT,
-                max_mensajes INT DEFAULT 10,
-                tiempo_max_respuesta INT DEFAULT 30,
-                logo_url VARCHAR(255),
-                nombre_empresa VARCHAR(100),
-                app_logo VARCHAR(255),
-                calendar_email VARCHAR(255),
-                transferencia_numero VARCHAR(100),
-                transferencia_nombre VARCHAR(200),
-                transferencia_banco VARCHAR(100),
-                asesor1_nombre VARCHAR(100),
-                asesor1_telefono VARCHAR(50),
-                asesor1_email VARCHAR(150),
-                asesor2_nombre VARCHAR(100),
-                asesor2_telefono VARCHAR(50),
-                asesor2_email VARCHAR(150),
-                asesores_json TEXT,
-                mensaje_tibio TEXT,
-                mensaje_frio TEXT,
-                mensaje_dormido TEXT
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-        ''')
-        # Consumir cualquier resultado pendiente del CREATE TABLE para limpiar el cursor
-        cursor.fetchall() 
-    except Exception as e:
-        # Si la tabla ya existe o hay warning, lo ignoramos pero seguimos
-        pass
-    
-    # 2. Ejecutar SELECT (ahora el cursor está limpio)
-    cursor.execute("SELECT * FROM configuracion WHERE id = 1;")
-    row = cursor.fetchone()
-    
-    cursor.close()
-    conn.close()
+        # Obtenemos la conexión desde tu services.py
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # 1. Ejecutar CREATE TABLE y CONSUMIR resultados (si los hubiera)
+        try:
+            # La lista de columnas aquí coincide exactamente con la de tu save_config
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS configuracion (
+                    id INT PRIMARY KEY DEFAULT 1,
+                    ia_nombre VARCHAR(100),
+                    negocio_nombre VARCHAR(100),
+                    descripcion TEXT,
+                    url VARCHAR(255),
+                    direccion VARCHAR(255),
+                    telefono VARCHAR(50),
+                    correo VARCHAR(100),
+                    que_hace TEXT,
+                    tono VARCHAR(50),
+                    lenguaje VARCHAR(50),
+                    contexto_adicional TEXT,
+                    restricciones TEXT,
+                    palabras_prohibidas TEXT,
+                    max_mensajes INT DEFAULT 10,
+                    tiempo_max_respuesta INT DEFAULT 30,
+                    logo_url VARCHAR(255),
+                    nombre_empresa VARCHAR(100),
+                    app_logo VARCHAR(255),
+                    calendar_email VARCHAR(255),
+                    transferencia_numero VARCHAR(100),
+                    transferencia_nombre VARCHAR(200),
+                    transferencia_banco VARCHAR(100),
+                    asesor1_nombre VARCHAR(100),
+                    asesor1_telefono VARCHAR(50),
+                    asesor1_email VARCHAR(150),
+                    asesor2_nombre VARCHAR(100),
+                    asesor2_telefono VARCHAR(50),
+                    asesor2_email VARCHAR(150),
+                    asesores_json TEXT,
+                    mensaje_tibio TEXT,
+                    mensaje_frio TEXT,
+                    mensaje_dormido TEXT
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            ''')
+            # Consumir cualquier resultado pendiente del CREATE TABLE para limpiar el cursor
+            cursor.fetchall() 
+        except Exception:
+            # Si la tabla ya existe o hay un warning, lo ignoramos de forma segura
+            pass
+        
+        # 2. Ejecutar SELECT (con el cursor ya limpio y garantizado)
+        cursor.execute("SELECT * FROM configuracion WHERE id = 1;")
+        row = cursor.fetchone()
+
+    except Exception as db_err:
+        # Registramos si hubo un error real al conectar o consultar
+        print(f"Error crítico en la base de datos dentro de load_config: {db_err}")
+        # Opcional: puedes dejar que levante el error o que continúe y devuelva defaults
+        
+    finally:
+        # ¡LA CLAVE! Este bloque se ejecuta SIEMPRE. 
+        # Libera los recursos en tu MySQL y regresa la conexión a services.py
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close() 
+
+    # --- 3. Procesamiento de datos (Totalmente fuera del ciclo de la conexión) ---
 
     if not row:
-        # Retornar estructura vacía con defaults para evitar KeyErrors
+        # Retornar estructura vacía con defaults para evitar KeyErrors en tu frontend/backend
         return {
             'negocio': {}, 
             'personalizacion': {}, 
             'restricciones': {}, 
             'asesores': {}, 
             'asesores_list': [],
-            'leads': {'mensaje_tibio': '', 'mensaje_frio': '', 'mensaje_dormido': ''} # <-- AÑADIDO
+            'leads': {'mensaje_tibio': '', 'mensaje_frio': '', 'mensaje_dormido': ''}
         }
 
-    # ... (resto del mapeo de campos igual que antes) ...
+    # Mapeo del diccionario de negocio
     negocio = {
         'ia_nombre': row.get('ia_nombre'),
         'negocio_nombre': row.get('negocio_nombre'),
@@ -5188,10 +5207,14 @@ def load_config(config=None):
         'transferencia_nombre': row.get('transferencia_nombre', ''),
         'transferencia_banco': row.get('transferencia_banco', ''),
     }
+    
+    # Mapeo de personalización
     personalizacion = {
         'tono': row.get('tono'),
         'lenguaje': row.get('lenguaje'),
     }
+    
+    # Mapeo de restricciones
     restricciones = {
         'restricciones': row.get('restricciones', ''),
         'palabras_prohibidas': row.get('palabras_prohibidas', ''),
@@ -5199,14 +5222,14 @@ def load_config(config=None):
         'tiempo_max_respuesta': row.get('tiempo_max_respuesta', 30)
     }
     
-    # --- Mapeo de campos de leads ---
+    # --- Mapeo de campos de leads integrado con éxito ---
     leads = {
         'mensaje_tibio': row.get('mensaje_tibio', ''),
         'mensaje_frio': row.get('mensaje_frio', ''),
         'mensaje_dormido': row.get('mensaje_dormido', '')
     }
 
-    # ... (Lógica de asesores existente sin cambios) ...
+    # Lógica de asesores (Estructura robusta multi-asesor con fallback legacy)
     asesores_list = []
     asesores_map = {}
     try:
@@ -5228,14 +5251,16 @@ def load_config(config=None):
                         asesores_map[f'asesor{idx}_email'] = a.get('email', '')
             except Exception:
                 pass
+                
         if not asesores_list:
-            # Fallback legacy
+            # Fallback para el sistema legacy por si no hay JSON
             a1n = (row.get('asesor1_nombre') or '').strip()
             a1t = (row.get('asesor1_telefono') or '').strip()
             a1e = (row.get('asesor1_email') or '').strip()
             a2n = (row.get('asesor2_nombre') or '').strip()
             a2t = (row.get('asesor2_telefono') or '').strip()
             a2e = (row.get('asesor2_email') or '').strip()
+            
             if a1n or a1t or a1e:
                 asesores_list.append({'nombre': a1n, 'telefono': a1t, 'email': a1e})
                 asesores_map['asesor1_nombre'] = a1n
@@ -5249,13 +5274,14 @@ def load_config(config=None):
     except Exception:
         pass
 
+    # Devolvemos el diccionario final estructurado que Flask espera recibir
     return {
         'negocio': negocio,
         'personalizacion': personalizacion,
         'restricciones': restricciones,
         'asesores': asesores_map,
         'asesores_list': asesores_list,
-        'leads': leads # <-- DEVOLVER EL MAPEO DE LEADS
+        'leads': leads
     }
 
 def save_config(cfg_all, config=None):
