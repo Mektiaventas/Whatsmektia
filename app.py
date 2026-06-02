@@ -9671,12 +9671,24 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 historial_text += f"Asistente: {h.get('respuesta')}\n"
 
         # ================================================================
-        # INICIO DEL BLOQUE - IA TOTAL CON FORMATO "FICHA DE PRODUCTO"
+        # 🎯 ORQUESTADOR: DECISIÓN DE RUTA
+        # El orquestador evalúa el mensaje y decide qué módulo ejecutar.
+        # Si el usuario pide ver imágenes/productos → fichas_ia_total
+        # En cualquier otro caso → DeepSeek responde con texto
         # ================================================================
-        # Inyectamos historial_final en fichas_ia_total
-        #if fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_final=historial_final):
-        #    app.logger.info(f"✅ Fichas enviadas, cerramos flujo para {numero}")
-        #    return True
+        _texto_norm = normalizar_texto_busqueda(texto or "")
+        _kw_visuales = [
+            'foto', 'fotos', 'imagen', 'imagenes',
+            'muestra', 'muestras', 'muestrame', 'mostrar',
+            'ver', 'verla', 'enseña', 'ensenas',
+        ]
+        if any(kw in _texto_norm for kw in _kw_visuales):
+            app.logger.info(f"📸 [ORQUESTADOR] Intención visual detectada → fichas_ia_total para {numero}")
+            if fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_final=historial_final):
+                app.logger.info(f"✅ [ORQUESTADOR] Fichas enviadas, cerrando flujo para {numero}")
+                return True
+            # Si fichas_ia_total no encontró productos, cae a DeepSeek normalmente
+            app.logger.warning(f"⚠️ [ORQUESTADOR] fichas_ia_total sin resultados, delegando a DeepSeek")
         # ================================================================
         # ================================================================
         # 🛠️ INSERTA ESTAS LÍNEAS AQUÍ PARA REPARAR LAS VARIABLES DEFECTUOSAS
@@ -9814,11 +9826,10 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
    - Si el historial muestra que hablaban de "escritorios", mantén ese contexto
    - Cuando envíes imágenes, indica claramente de QUÉ producto es cada imagen
 
-9) **ENVÍO DE IMÁGENES:**
-   - Si el usuario pide "imágenes" o "fotos", el sistema YA las envió automáticamente
-   - Tu respuesta debe ser breve: "Te envié las imágenes de [PRODUCTOS]"
-   - NO digas "te envío" si ya se enviaron, di "te envié" o "ya te las envié"
-   - Menciona qué productos son las imágenes que se enviaron
+9) **IMÁGENES:**
+   - NO menciones imágenes, fotos ni fichas. El sistema las maneja por separado.
+   - Si el usuario preguntó por imágenes, ya se le enviaron antes de llegar aquí.
+   - Responde solo con texto informativo sobre los productos.
 
 ESTRUCTURA DEL CATÁLOGO:
 - sku: código único
@@ -10091,26 +10102,6 @@ EJEMPLOS:
                 app.logger.info(f"ℹ️ enviar_datos_transferencia devolvió sent={sent}, omitiendo respuesta_text redundante.")
             return True
 
-        # =====================================================================
-        # 📸 REINTEGRACIÓN INTELIGENTE DE FICHAS IA VISUALES (CON IMÁGENES)
-        # =====================================================================
-        # Si el usuario pregunta por precios, pide ver fotos, imágenes, etc.
-        palabras_clave_visuales = ['precio', 'foto', 'ver', 'imagen', 'ofreces', 'catalogo', 'cursos', 'talleres']
-        if any(kw in (texto or "").lower() for kw in palabras_clave_visuales):
-            app.logger.info(f"📸 Activando Fichas IA Visuales para {numero}")
-            fichas_enviadas = fichas_ia_total(
-                numero=numero, 
-                texto=texto, 
-                es_audio=es_audio, 
-                config=config, 
-                incoming_saved=incoming_saved, 
-                historial_final=historial_final
-            )
-            if fichas_enviadas:
-                app.logger.info(f"✅ Fichas visuales ejecutadas y enviadas con éxito para {numero}")
-                return True
-        # =====================================================================
-
         # RESPUESTA TEXTUAL (Y DE AUDIO) POR DEFECTO
         if respuesta_text:
             respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
@@ -10275,7 +10266,7 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
         if isinstance(ds_data, dict) and 'choices' in ds_data:
             choices = ds_data['choices']
             if isinstance(choices, list) and len(choices) > 0:
-                first_choice = choices[0]
+                first_choice = choices[0]  # FIX: era la lista entera
                 if isinstance(first_choice, dict):
                     message_dict = first_choice.get('message')
                     if isinstance(message_dict, dict):
@@ -10286,10 +10277,10 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
             producto_aplica = "SI_APLICA"
             try:
                 parts = raw_ds.split("SEARCH:", 1)
-                rest = parts[1].strip() if len(parts) > 1 else ""  # FIX: split() devuelve lista, no string
+                rest = parts[1].strip() if len(parts) > 1 else ""
                 if "SHOW: YES" in rest or "SHOW:YES" in rest:
                     solicita_imagen_ia = True
-                contexto_busqueda = rest.split('|')[0].strip().strip('"').strip("'")  # FIX: misma corrección
+                contexto_busqueda = rest.split('|')[0].strip().strip('"').strip("'")
             except IndexError: pass
             
         elif "AGENDAR_CITA" in raw_ds.upper():
@@ -10309,8 +10300,7 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
 
     except Exception as e:
         app.logger.warning(f"⚠️ DeepSeek error interno en Modo Fichas: {e}")
-        texto_normalizado = normalizar_texto_busqueda(texto)
-        if any(kw in texto_normalizado for kw in ['imagen', 'imagenes', 'fotos', 'muestra', 'muestras', 'muestrame', 'mostrar', 'ver']):
+        if any(kw in (texto or "").lower() for kw in ['precio', 'foto', 'ver']):
             producto_aplica = "SI_APLICA"
 
     # --- 4. LÓGICA DE BÚSQUEDA Y ENVÍO DE FICHAS ---
@@ -10321,7 +10311,8 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
         precios = obtener_productos_por_palabra_clave(contexto_busqueda, config, limite=200, contexto_ia=contexto_ia_final)
         
         solicita_imagen = solicita_imagen_ia
-        if not solicita_imagen and any(x in (texto or "").lower() for x in ['foto', 'imagen', 'verla', 'muestras', 'enseñas']):
+        texto_norm_ficha = normalizar_texto_busqueda(texto or "")
+        if not solicita_imagen and any(x in texto_norm_ficha for x in ['foto', 'imagen', 'imagenes', 'fotos', 'verla', 'muestras', 'muestra', 'muestrame', 'ensenas', 'mostrar']):
             solicita_imagen = True
 
         if solicita_imagen and precios:
