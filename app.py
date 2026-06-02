@@ -9414,8 +9414,9 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
         {contexto_productos}
         REGLAS DE FORMATO:
         1. Usa *negritas* para resaltar.
-        2. Usa viñetas (•) y saltos de línea DOBLES.
+        2. Usa viñetas (•) y saltos de línea simples (\n).
         3. Usa emojis sutiles.
+        4. NUNCA uses <br>, <br/> ni etiquetas HTML.
 
         OBLIGATORIO: Responde SOLAMENTE con un objeto JSON válido:
         {{
@@ -9672,23 +9673,15 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
 
         # ================================================================
         # 🎯 ORQUESTADOR: DECISIÓN DE RUTA
-        # El orquestador evalúa el mensaje y decide qué módulo ejecutar.
-        # Si el usuario pide ver imágenes/productos → fichas_ia_total
-        # En cualquier otro caso → DeepSeek responde con texto
+        # fichas_ia_total siempre va primero:
+        #   - Si encuentra productos → manda ficha (texto + imagen si hay)
+        #   - Si no encuentra nada → delega a DeepSeek
         # ================================================================
-        _texto_norm = normalizar_texto_busqueda(texto or "")
-        _kw_visuales = [
-            'foto', 'fotos', 'imagen', 'imagenes',
-            'muestra', 'muestras', 'muestrame', 'mostrar',
-            'ver', 'verla', 'enseña', 'ensenas',
-        ]
-        if any(kw in _texto_norm for kw in _kw_visuales):
-            app.logger.info(f"📸 [ORQUESTADOR] Intención visual detectada → fichas_ia_total para {numero}")
-            if fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_final=historial_final):
-                app.logger.info(f"✅ [ORQUESTADOR] Fichas enviadas, cerrando flujo para {numero}")
-                return True
-            # Si fichas_ia_total no encontró productos, cae a DeepSeek normalmente
-            app.logger.warning(f"⚠️ [ORQUESTADOR] fichas_ia_total sin resultados, delegando a DeepSeek")
+        app.logger.info(f"🎯 [ORQUESTADOR] Evaluando mensaje con fichas_ia_total para {numero}")
+        if fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_final=historial_final):
+            app.logger.info(f"✅ [ORQUESTADOR] Fichas enviadas, cerrando flujo para {numero}")
+            return True
+        app.logger.info(f"ℹ️ [ORQUESTADOR] Sin productos relevantes → delegando a DeepSeek para {numero}")
         # ================================================================
         # ================================================================
         # 🛠️ INSERTA ESTAS LÍNEAS AQUÍ PARA REPARAR LAS VARIABLES DEFECTUOSAS
@@ -9819,7 +9812,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 
 6) Responde SOLO con un JSON válido.
 
-7) Campo 'respuesta_text': Conciso (1-3 líneas máximo).
+7) Campo 'respuesta_text': Conciso (1-3 líneas máximo). Usa solo \n para saltos de línea, NUNCA <br> ni HTML.
 8) **CONTEXTO Y REFERENCIAS:**
    - Si el usuario dice "sus imágenes", "esos", "el primero", etc., se refiere a productos mencionados antes
    - NO hagas una búsqueda nueva, usa los productos del catálogo actual
@@ -9922,13 +9915,20 @@ EJEMPLOS:
             app.logger.error(f"🔴 Error parseando JSON IA: {e} -- raw snippet: {match.group(1)[:500]}")
             return False
         intent = (decision.get('intent') or 'NO_ACTION').upper()
-        # --- NUEVO: Recalcular interés basado en contexto IA ---
+        # --- Recalcular interés basado en contexto IA ---
         nivel_interes_ia = (decision.get('nivel_interes') or 'BAJO').upper()
         try:
-            recalcular_interes_lead(numero, nivel_interes_ia, config)
-            app.logger.info(f"🌡 Interés recalculado para {numero}: IA detectó contexto {nivel_interes_ia}")
+            # Actualizar interés directamente en BD sin función externa
+            _conn_interes = get_db_connection(config)
+            if _conn_interes:
+                _cur = _conn_interes.cursor()
+                _cur.execute("UPDATE contactos SET interes=%s WHERE numero=%s", (nivel_interes_ia, numero))
+                _conn_interes.commit()
+                _cur.close()
+                _conn_interes.close()
+                app.logger.info(f"🌡 Interés actualizado para {numero}: {nivel_interes_ia}")
         except Exception as e:
-            app.logger.error(f"Error recalculando interés: {e}")
+            app.logger.warning(f"⚠️ No se pudo actualizar interés: {e}")
         # ------------------------------------------------------
         respuesta_text = decision.get('respuesta_text') or ""
         image_field = decision.get('image')
@@ -10310,12 +10310,8 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
     if producto_aplica == "SI_APLICA" and texto:
         precios = obtener_productos_por_palabra_clave(contexto_busqueda, config, limite=200, contexto_ia=contexto_ia_final)
         
-        solicita_imagen = solicita_imagen_ia
-        texto_norm_ficha = normalizar_texto_busqueda(texto or "")
-        if not solicita_imagen and any(x in texto_norm_ficha for x in ['foto', 'imagen', 'imagenes', 'fotos', 'verla', 'muestras', 'muestra', 'muestrame', 'ensenas', 'mostrar']):
-            solicita_imagen = True
-
-        if solicita_imagen and precios:
+        # Siempre mandamos ficha cuando hay productos — con o sin solicitud explícita de imagen
+        if precios:
             termino = (contexto_busqueda or "").lower().strip()
             match_sku = [p for p in precios if termino == (p.get('sku') or '').lower()]
             if match_sku:
