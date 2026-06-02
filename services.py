@@ -34,6 +34,7 @@ def get_db_connection(config=None):
     return _MYSQL_POOLS[pool_key].get_connection()
 def asegurar_configuracion_cliente(conn, db_name, subdominio):
     """Asegura que la tabla configuracion del cliente tenga la columna dominio y esté llena."""
+    cursor = None
     try:
         cursor = conn.cursor()
         # 1. Verificar si la columna 'dominio' existe
@@ -51,9 +52,12 @@ def asegurar_configuracion_cliente(conn, db_name, subdominio):
         """, (dominio_esperado, dominio_esperado))
         
         conn.commit()
-        cursor.close()
     except Exception as e:
         logger.error(f"❌ Error en auto-configuración para {db_name}: {e}")
+    finally:
+        # Garantiza que el cursor se cierre pase lo que pase
+        if cursor:
+            cursor.close()
 def get_cliente_by_subdomain(subdominio):
     try:
         # Conectamos a la base maestra 'clientes'
