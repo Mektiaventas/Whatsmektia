@@ -10309,7 +10309,8 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
 
     except Exception as e:
         app.logger.warning(f"⚠️ DeepSeek error interno en Modo Fichas: {e}")
-        if any(kw in (texto or "").lower() for kw in ['precio', 'foto', 'ver']):
+        texto_normalizado = normalizar_texto_busqueda(texto)
+        if any(kw in texto_normalizado for kw in ['imagen', 'imagenes', 'fotos', 'muestra', 'muestras', 'muestrame', 'mostrar', 'ver']):
             producto_aplica = "SI_APLICA"
 
     # --- 4. LÓGICA DE BÚSQUEDA Y ENVÍO DE FICHAS ---
