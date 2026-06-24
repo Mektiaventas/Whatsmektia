@@ -20,12 +20,13 @@ def get_db_connection(config=None):
         try:
             _MYSQL_POOLS[pool_key] = pooling.MySQLConnectionPool(
                 pool_name=f"p_{os.getpid()}_{db_name}"[:32],
-                pool_size=10,
+                pool_size=25,
                 host=db_host,
                 user=user,
                 password=password,
                 database=db_name,
-                charset='utf8mb4'
+                charset='utf8mb4',
+                pool_reset_session=True
             )
             logger.info(f"✅ Conexión establecida a BD: {db_name}")
         except Exception as e:
