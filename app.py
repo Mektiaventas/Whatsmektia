@@ -9842,15 +9842,35 @@ MÉTODO DE CLASIFICACIÓN (IMPORTANTE):
 4. Si coincide, ese producto es relevante
 
 Claves del JSON:
-- intent: ["INFORMACION_SERVICIOS_O_PRODUCTOS","DATOS_TRANSFERENCIA","RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","PASAR_ASESOR","NO_ACTION","COTIZAR"]
+- intent: ["INFORMACION_SERVICIOS_O_PRODUCTOS","DATOS_TRANSFERENCIA","RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","PASAR_ASESOR","NO_ACTION","COTIZAR","COMPRAR_PRODUCTO"]
 - respuesta_text: string (menciona nombres completos, NO códigos)
 - nivel_interes: "ESPECIFICO" | "GENERAL" | "BAJO"
 - notify_asesor: boolean
 - source: "catalog" | "none"
+- productos_solicitados: lista de objetos con "nombre" y "cantidad" (solo incluir cuando intent=COTIZAR o COMPRAR_PRODUCTO)
+
+REGLAS DE INTENTS ESPECIALES:
+
+COTIZAR → Cuando el usuario menciona UNA CANTIDAD ESPECÍFICA de uno o más productos.
+  Ejemplos: "quiero 3 sillas", "necesito 5 escritorios", "dame 2 de esos", "10 unidades del modelo X"
+  En ese caso devuelve:
+  {{
+    "intent": "COTIZAR",
+    "respuesta_text": "Perfecto, calculando tu cotización...",
+    "productos_solicitados": [{{"nombre": "Silla Ejecutiva", "cantidad": 3}}]
+  }}
+
+COMPRAR_PRODUCTO → Cuando el usuario indica que quiere COMPRAR / PEDIR / confirmar un pedido con datos de entrega.
+  Ejemplos: "quiero comprar", "me lo llevas a...", "lo quiero, mi dirección es..."
+
+DATOS_TRANSFERENCIA → Cuando el usuario pregunta cómo pagar por transferencia, pide número de cuenta, CLABE o datos bancarios.
+  Ejemplos: "¿a qué número te transfiero?", "me das tu cuenta", "quiero pagar por transferencia", "cuál es tu clabe"
+  En ese caso el campo "transferencias" del JSON de entrada YA CONTIENE los datos bancarios — ÚSAlos en respuesta_text.
 
 EJEMPLOS:
-✅ Usuario: "sillas" → Buscar donde categoria/servicio/descripcion contengan "silla" (sin importar mayúsculas)
-✅ Usuario: "CURSOS" → Buscar donde categoria/servicio/descripcion contengan "curso" (sin importar mayúsculas)
+✅ Usuario: "sillas" → intent INFORMACION_SERVICIOS_O_PRODUCTOS
+✅ Usuario: "quiero 3 sillas" → intent COTIZAR con productos_solicitados
+✅ Usuario: "¿a qué número transfiero?" → intent DATOS_TRANSFERENCIA, usa los datos de "transferencias"
 ❌ NO buscar solo productos con categoria exactamente = "SILLA"
 ❌ NO clasificar basándote solo en subcategoria
 """
@@ -9915,6 +9935,19 @@ EJEMPLOS:
             app.logger.error(f"🔴 Error parseando JSON IA: {e} -- raw snippet: {match.group(1)[:500]}")
             return False
         intent = (decision.get('intent') or 'NO_ACTION').upper()
+
+        # --- INTERCEPCIÓN BANCARIA: si el usuario pide datos de pago/transferencia, forzar intent ---
+        _texto_lower_bank = (texto or "").lower()
+        _keywords_bank = [
+            "número de cuenta", "numero de cuenta", "clabe", "cuenta bancaria",
+            "a qué número", "a que numero", "transferencia", "transfiero", "deposito",
+            "depósito", "datos de pago", "datos bancarios", "banco", "pagar con transferencia",
+            "cómo pago", "como pago", "formas de pago", "forma de pago"
+        ]
+        if intent not in ("DATOS_TRANSFERENCIA", "PASAR_ASESOR") and any(kw in _texto_lower_bank for kw in _keywords_bank):
+            app.logger.info(f"🏦 [INTERCEPCION BANCARIA] Forzando DATOS_TRANSFERENCIA para '{texto[:60]}'")
+            intent = "DATOS_TRANSFERENCIA"
+
         # --- Recalcular interés basado en contexto IA ---
         nivel_interes_ia = (decision.get('nivel_interes') or 'BAJO').upper()
         try:
@@ -9962,17 +9995,83 @@ EJEMPLOS:
                 return True
                 
         if intent == "COTIZAR":
-            cotizar_text = cotizar_proyecto(numero, config=config)
+            # Intentar calcular sumatoria directa si la IA devolvió productos_solicitados con cantidades
+            productos_sol = decision.get('productos_solicitados') or []
+            cotizar_text = None
+
+            if productos_sol and isinstance(productos_sol, list) and len(productos_sol) > 0:
+                try:
+                    lineas_cot = []
+                    total_cot = 0.0
+                    hay_total = False
+                    for item_sol in productos_sol:
+                        nombre_sol = str(item_sol.get('nombre') or '').strip()
+                        cantidad_sol = int(item_sol.get('cantidad') or 1)
+                        prod_db = obtener_producto_por_sku_o_nombre(nombre_sol, config) if nombre_sol else None
+                        if prod_db:
+                            precio_unit_raw = (
+                                prod_db.get('precio_menudeo')
+                                or prod_db.get('precio')
+                                or prod_db.get('costo')
+                                or prod_db.get('precio_mayoreo')
+                            )
+                            try:
+                                precio_unit = float(re.sub(r'[^\d.]', '', str(precio_unit_raw))) if precio_unit_raw else None
+                            except Exception:
+                                precio_unit = None
+                            titulo_sol = prod_db.get('servicio') or prod_db.get('modelo') or nombre_sol
+                            sku_sol = prod_db.get('sku') or 'S/N'
+                            if precio_unit is not None:
+                                subtotal = round(precio_unit * cantidad_sol, 2)
+                                total_cot += subtotal
+                                hay_total = True
+                                lineas_cot.append(
+                                    f"• {cantidad_sol} x *{titulo_sol}* (SKU: {sku_sol})\n"
+                                    f"  💰 ${precio_unit:,.2f} c/u = *${subtotal:,.2f}*"
+                                )
+                            else:
+                                lineas_cot.append(
+                                    f"• {cantidad_sol} x *{titulo_sol}* (SKU: {sku_sol})\n"
+                                    f"  💰 Precio: Consultar"
+                                )
+                        else:
+                            lineas_cot.append(
+                                f"• {cantidad_sol} x *{nombre_sol}*\n"
+                                f"  ⚠️ Producto no encontrado en catálogo"
+                            )
+                    resumen_cot = "\n".join(lineas_cot)
+                    if hay_total:
+                        cotizar_text = (
+                            f"🧾 *Tu cotización:*\n\n"
+                            f"{resumen_cot}\n\n"
+                            f"💵 *Total: ${total_cot:,.2f}*\n\n"
+                            f"¿Confirmas el pedido? Dime tu nombre y dirección de entrega para procesarlo 🚀"
+                        )
+                    else:
+                        cotizar_text = (
+                            f"🧾 *Tu cotización:*\n\n"
+                            f"{resumen_cot}\n\n"
+                            f"¿Deseas continuar? Dime tu nombre y dirección para coordinar la entrega."
+                        )
+                    app.logger.info(f"✅ Cotización calculada para {numero}: total={total_cot}")
+                except Exception as e_cot:
+                    app.logger.error(f"🔴 Error calculando cotización inline: {e_cot}")
+                    cotizar_text = None
+
+            # Fallback: cotización por proyecto (flujo anterior)
+            if not cotizar_text:
+                cotizar_text = cotizar_proyecto(numero, config=config)
+
             if cotizar_text:
                 if numero.startswith('tg_'):
                     telegram_token = config.get('telegram_token')
                     if telegram_token:
                         chat_id = numero.replace('tg_', '')
-                        send_telegram_message(chat_id, cotizar_text, telegram_token) 
+                        send_telegram_message(chat_id, cotizar_text, telegram_token)
                     else:
                         app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
                 else:
-                    enviar_mensaje(numero, cotizar_text, config) 
+                    enviar_mensaje(numero, cotizar_text, config)
                 registrar_respuesta_bot(numero, texto, cotizar_text, config, incoming_saved=incoming_saved)
                 return True
               
@@ -10340,6 +10439,10 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
         desc_wa = p.get('descripcion') or ''
         if len(desc_wa) > 250: desc_wa = desc_wa[:247] + "..."
 
+        # Caption corto para la imagen (WhatsApp solo muestra ~80 chars visibles antes de "Ver más")
+        caption_img = f"🔹 {titulo_p.upper()} | SKU: {sku_p}"
+
+        # Ficha completa que se envía como texto separado después de la imagen
         ficha_wa = (
             f"🔹 *{titulo_p.upper()}*\n\n"
             f"{precios_wa}\n"
@@ -10348,9 +10451,13 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
         )
 
         if img_url:
-            enviar_imagen(numero=numero, image_url=img_url, texto=ficha_wa, config=config)
-            actualizar_respuesta(numero, texto, f"Ficha enviada: {titulo_p}", config, respuesta_tipo='imagen', respuesta_media_url=img_url)
-            time.sleep(1) 
+            # 1) Enviamos la imagen con caption corto
+            enviar_imagen(numero=numero, image_url=img_url, texto=caption_img, config=config)
+            time.sleep(0.5)
+            # 2) Enviamos la ficha completa como mensaje de texto para que nada se pierda
+            enviar_mensaje(numero, ficha_wa, config)
+            actualizar_respuesta(numero, texto, ficha_wa, config, respuesta_tipo='imagen', respuesta_media_url=img_url)
+            time.sleep(0.8)
         else:
             enviar_mensaje(numero, ficha_wa, config)
 
