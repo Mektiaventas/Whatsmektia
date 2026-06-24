@@ -9143,6 +9143,12 @@ Reglas: NO inventes precios; Incluye todos los productos y cantidades. Si faltan
             # ← CORREGIDO: Mensaje de log para cuando no está listo
             elif not is_fully_ready:
                 app.logger.info("ℹ️ comprar_producto: NO está completamente listo (is_fully_ready=False) -> esperando más confirmación.")
+                # Guardar precio_total parcial para que DATOS_TRANSFERENCIA lo pueda recuperar
+                if datos_compra.get('precio_total'):
+                    try:
+                        actualizar_estado_conversacion(numero, "PEDIDO_EN_PROGRESO", "precio_parcial", {"precio_total": float(datos_compra['precio_total'])}, config)
+                    except Exception:
+                        pass
             else:
                 app.logger.info("ℹ️ comprar_producto: datos incompletos para notificar (p.ej. falta precio_total/metodo/direccion).")
 
@@ -10510,6 +10516,12 @@ EJEMPLOS:
             try:
                 estado_prev = obtener_estado_conversacion(numero, config)
                 datos_pedido_prev = (estado_prev.get('datos') or {}) if estado_prev else {}
+                # Si el estado actual no tiene precio_total, buscar en estados anteriores
+                if not datos_pedido_prev.get('precio_total') and not datos_pedido_prev.get('monto_esperado'):
+                    if estado_prev and estado_prev.get('contexto') == 'PEDIDO_EN_PROGRESO':
+                        precio_parcial = datos_pedido_prev.get('precio_total')
+                        if precio_parcial:
+                            datos_pedido_prev['monto_esperado'] = precio_parcial
             except Exception:
                 datos_pedido_prev = {}
             actualizar_estado_conversacion(numero, 'ESPERANDO_COMPROBANTE', 'datos_transferencia_enviados', datos_pedido_prev, config)
