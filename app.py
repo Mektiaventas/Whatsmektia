@@ -4962,8 +4962,10 @@ def ejecutar_envio_pdf_inteligente(numero, texto, config):
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         
-        tenant_slug = config.get('subdominio', 'default').lower()
-        query_db = "SELECT * FROM documents_publicos WHERE tenant_slug = %s"
+        # Derivar tenant_slug desde dominio (ej: 'smartwhats.mektia.com' → 'smartwhats')
+        dominio_raw = config.get('dominio') or config.get('subdominio') or 'default'
+        tenant_slug = dominio_raw.split('.')[0].lower()
+        query_db = "SELECT * FROM documents_publicos WHERE tenant_slug = %s OR tenant_slug IS NULL"
         cursor.execute(query_db, (tenant_slug,))
         docs = cursor.fetchall()
 
