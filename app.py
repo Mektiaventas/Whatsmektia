@@ -6151,7 +6151,7 @@ REGLAS DE VALIDACIÓN:
             app.logger.warning("⚠️ GEMINI_API_KEY no configurada, usando OpenAI como fallback")
             raise ValueError("No GEMINI_API_KEY")
 
-        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
         parts = [{"text": prompt_vision}]
         if imagen_data:
             parts.append({"inline_data": {"mime_type": mime_type, "data": imagen_data}})
