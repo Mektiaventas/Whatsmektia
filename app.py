@@ -6271,7 +6271,7 @@ REGLAS DE VALIDACIÓN:
 
         # Notificar al asesor
         try:
-            asesor = obtener_siguiente_asesor(config)
+            asesor = obtener_siguiente_asesor(numero_cliente=numero, config=config)
             asesor_tel = asesor.get('telefono') if asesor and isinstance(asesor, dict) else None
             tel_admin = config.get('telefono_notificaciones')
             destinatarios = list({t for t in [asesor_tel, tel_admin] if t})
