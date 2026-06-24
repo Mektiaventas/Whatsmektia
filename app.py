@@ -9570,7 +9570,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
     # =========================================================================
                                    
     # 2.5 --- INTERCEPCIÓN POR ASESOR HUMANO ---
-    # Aquí pasamos el historial_final si la función lo requiere
+    texto_norm = (texto or "").strip().lower()
     if detectar_intervencion_humana_ia(texto_norm, numero, config):
         app.logger.info(f"⚠️ [HUMANO] El usuario {numero} requiere atención de un asesor.")
         exito_paso = pasar_contacto_asesor(numero, config=config, historial_inyectado=historial_final)
