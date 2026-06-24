@@ -91,6 +91,7 @@ app.jinja_env.filters["bandera"] = get_country_flag
 MESSENGER_VERIFY_TOKEN_GLOBAL = os.getenv("MESSENGER_VERIFY_TOKEN", VERIFY_TOKEN)
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_TOKEN")
 ALERT_NUMBER = os.getenv("ALERT_NUMBER")
 SECRET_KEY = os.getenv("SECRET_KEY", "cualquier-cosa")
 # After app.config[...] and logger setup
@@ -6080,6 +6081,216 @@ def extraer_codigo_producto(texto):
     
     return None
 
+def analizar_comprobante_pago(numero, imagen_base64, public_url, datos_pedido, config):
+    """
+    Usa Gemini Flash (vision) para extraer datos del comprobante y validarlos
+    contra los datos de transferencia del negocio (cuenta, banco, beneficiario, monto).
+    Guarda en tabla comprobantes y notifica al asesor.
+    Retorna texto de respuesta para el cliente.
+    """
+    try:
+        monto_esperado = datos_pedido.get('precio_total')
+        nombre_cliente = datos_pedido.get('nombre_cliente', 'Cliente')
+
+        # Obtener datos de transferencia del negocio para validar contra ellos
+        cfg_full = load_config(config)
+        negocio = cfg_full.get('negocio', {}) or {}
+        cuenta_esperada  = str(negocio.get('transferencia_numero') or '').strip()
+        banco_esperado   = str(negocio.get('transferencia_banco') or '').strip()
+        titular_esperado = str(negocio.get('transferencia_nombre') or '').strip()
+        # Últimos 4 dígitos de la cuenta para coincidencia parcial
+        ultimos_digitos  = cuenta_esperada[-4:] if len(cuenta_esperada) >= 4 else cuenta_esperada
+
+        monto_str = f"${monto_esperado:,.2f}" if monto_esperado else "desconocido"
+
+        prompt_vision = f"""Eres un extractor especializado en comprobantes bancarios mexicanos.
+Analiza la imagen y devuelve SOLO un JSON con esta estructura exacta (sin texto adicional):
+{{
+  "es_comprobante": true,
+  "monto": 1234.56,
+  "banco_origen": "Banco del que envió el cliente",
+  "banco_destino": "Banco receptor visible en el comprobante",
+  "beneficiario": "Nombre del destinatario exactamente como aparece",
+  "cuenta_destino_visible": "Número o últimos dígitos de cuenta/CLABE destino visibles",
+  "referencia": "Número de referencia, folio o clave de rastreo",
+  "fecha": "Fecha visible en el comprobante",
+  "concepto": "Concepto o descripción si aparece",
+  "coincide_cuenta": true,
+  "coincide_banco": true,
+  "coincide_monto": true,
+  "valido": true
+}}
+
+DATOS DEL NEGOCIO PARA VALIDAR:
+- Cuenta/CLABE esperada: {cuenta_esperada} (últimos 4 dígitos: {ultimos_digitos})
+- Banco esperado: {banco_esperado}
+- Titular esperado: {titular_esperado}
+- Monto esperado del pedido: {monto_str}
+
+REGLAS DE VALIDACIÓN:
+- "coincide_cuenta": true si los últimos 4+ dígitos de la cuenta destino visible coinciden con "{ultimos_digitos}"
+- "coincide_banco": true si el banco destino visible es similar a "{banco_esperado}" (ignorar mayúsculas/abreviaciones)
+- "coincide_monto": true si el monto del comprobante coincide con {monto_str} (tolerancia ±5%)
+- "valido": true SOLO si coincide_cuenta Y coincide_monto son ambos true
+- Si la imagen NO es un comprobante de pago, devuelve {{"es_comprobante": false}}"""
+
+        # Preparar imagen para Gemini (base64 sin prefijo data:...)
+        imagen_data = None
+        mime_type = "image/jpeg"
+        if imagen_base64 and imagen_base64.startswith("data:"):
+            header, b64 = imagen_base64.split(",", 1)
+            if "png" in header:
+                mime_type = "image/png"
+            elif "webp" in header:
+                mime_type = "image/webp"
+            imagen_data = b64
+        elif imagen_base64:
+            imagen_data = imagen_base64
+
+        if not GEMINI_API_KEY:
+            app.logger.warning("⚠️ GEMINI_API_KEY no configurada, usando OpenAI como fallback")
+            raise ValueError("No GEMINI_API_KEY")
+
+        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        parts = [{"text": prompt_vision}]
+        if imagen_data:
+            parts.append({"inline_data": {"mime_type": mime_type, "data": imagen_data}})
+        elif public_url:
+            parts.append({"text": f"\n[Imagen disponible en: {public_url}]"})
+
+        gemini_payload = {"contents": [{"parts": parts}], "generationConfig": {"temperature": 0.0, "maxOutputTokens": 600}}
+        resp = requests.post(gemini_url, json=gemini_payload, timeout=30)
+        resp.raise_for_status()
+        raw = resp.json()['candidates'][0]['content']['parts'][0]['text'].strip()
+
+        match = re.search(r'\{.*\}', raw, re.DOTALL)
+        datos_comp = json.loads(match.group(0)) if match else {}
+
+        if not datos_comp.get('es_comprobante'):
+            return "La imagen que enviaste no parece ser un comprobante de pago. ¿Puedes enviar una captura clara de tu transferencia?"
+
+        es_valido = bool(datos_comp.get('valido'))
+        monto_det = datos_comp.get('monto')
+
+        # Guardar en tabla comprobantes
+        try:
+            conn = get_db_connection(config)
+            cursor = conn.cursor()
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS comprobantes (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    numero VARCHAR(20) NOT NULL,
+                    nombre_cliente VARCHAR(200),
+                    imagen_url TEXT,
+                    monto_detectado DECIMAL(12,2),
+                    monto_esperado DECIMAL(12,2),
+                    banco_origen VARCHAR(200),
+                    banco_destino VARCHAR(200),
+                    beneficiario VARCHAR(200),
+                    cuenta_destino_visible VARCHAR(100),
+                    referencia VARCHAR(200),
+                    fecha_pago VARCHAR(50),
+                    concepto TEXT,
+                    coincide_cuenta TINYINT(1) DEFAULT 0,
+                    coincide_banco TINYINT(1) DEFAULT 0,
+                    coincide_monto TINYINT(1) DEFAULT 0,
+                    valido TINYINT(1) DEFAULT 0,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_numero (numero),
+                    INDEX idx_valido (valido),
+                    INDEX idx_timestamp (timestamp)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ''')
+            cursor.execute('''
+                INSERT INTO comprobantes (numero, nombre_cliente, imagen_url, monto_detectado, monto_esperado,
+                    banco_origen, banco_destino, beneficiario, cuenta_destino_visible,
+                    referencia, fecha_pago, concepto,
+                    coincide_cuenta, coincide_banco, coincide_monto, valido)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ''', (
+                numero, nombre_cliente, public_url,
+                monto_det, monto_esperado,
+                datos_comp.get('banco_origen', ''),
+                datos_comp.get('banco_destino', ''),
+                datos_comp.get('beneficiario', ''),
+                datos_comp.get('cuenta_destino_visible', ''),
+                datos_comp.get('referencia', ''),
+                datos_comp.get('fecha', ''),
+                datos_comp.get('concepto', ''),
+                1 if datos_comp.get('coincide_cuenta') else 0,
+                1 if datos_comp.get('coincide_banco') else 0,
+                1 if datos_comp.get('coincide_monto') else 0,
+                1 if es_valido else 0
+            ))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            app.logger.info(f"✅ Comprobante guardado: {numero} | monto={monto_det} | cuenta_ok={datos_comp.get('coincide_cuenta')} | valido={es_valido}")
+        except Exception as e:
+            app.logger.error(f"🔴 Error guardando comprobante en BD: {e}")
+
+        # Construir respuesta al cliente
+        if es_valido:
+            msg_cliente = (
+                f"✅ *¡Comprobante recibido y validado!*\n\n"
+                f"📋 *Detalles detectados:*\n"
+                f"• Monto: ${monto_det:,.2f if monto_det else '?'}\n"
+                f"• Banco origen: {datos_comp.get('banco_origen', 'N/D')}\n"
+                f"• Referencia: {datos_comp.get('referencia', 'N/D')}\n\n"
+                f"¡Gracias, {nombre_cliente}! Tu pedido está confirmado. "
+                f"Un asesor se pondrá en contacto para coordinar la entrega. 🚚"
+            )
+        else:
+            razones = []
+            if not datos_comp.get('coincide_cuenta'):
+                razones.append(f"la cuenta destino no coincide con nuestra cuenta (terminación *{ultimos_digitos}*)")
+            if not datos_comp.get('coincide_monto'):
+                razones.append(f"el monto detectado (${monto_det:,.2f if monto_det else '?'}) no coincide con el total del pedido ({monto_str})")
+            razon_txt = " y ".join(razones) if razones else "no pudo validarse automáticamente"
+            msg_cliente = (
+                f"⚠️ Recibimos tu comprobante, pero {razon_txt}.\n\n"
+                f"Un asesor lo revisará manualmente y te confirmará en breve."
+            )
+
+        # Notificar al asesor
+        try:
+            asesor = obtener_siguiente_asesor(config)
+            asesor_tel = asesor.get('telefono') if asesor and isinstance(asesor, dict) else None
+            tel_admin = config.get('telefono_notificaciones')
+            destinatarios = list({t for t in [asesor_tel, tel_admin] if t})
+            if destinatarios:
+                estado_icon = "✅" if es_valido else "⚠️"
+                alerta_asesor = (
+                    f"💳 *Comprobante de pago recibido* {estado_icon}\n\n"
+                    f"👤 *Cliente:* {nombre_cliente} ({numero})\n"
+                    f"💵 *Monto detectado:* ${monto_det:,.2f if monto_det else 'N/D'}\n"
+                    f"💵 *Monto esperado:* {monto_str}\n"
+                    f"🏦 *Banco origen:* {datos_comp.get('banco_origen', 'N/D')}\n"
+                    f"🏦 *Banco destino:* {datos_comp.get('banco_destino', 'N/D')}\n"
+                    f"👤 *Beneficiario en comprobante:* {datos_comp.get('beneficiario', 'N/D')}\n"
+                    f"🔢 *Cuenta visible:* {datos_comp.get('cuenta_destino_visible', 'N/D')}\n"
+                    f"🔖 *Referencia:* {datos_comp.get('referencia', 'N/D')}\n"
+                    f"📅 *Fecha:* {datos_comp.get('fecha', 'N/D')}\n\n"
+                    f"Cuenta ✓: {'Sí' if datos_comp.get('coincide_cuenta') else 'No'} | "
+                    f"Banco ✓: {'Sí' if datos_comp.get('coincide_banco') else 'No'} | "
+                    f"Monto ✓: {'Sí' if datos_comp.get('coincide_monto') else 'No'}\n"
+                    f"*Válido automático:* {'Sí' if es_valido else 'No — revisar manualmente'}\n\n"
+                    f"📎 {public_url or 'imagen no disponible'}"
+                )
+                for tel in destinatarios:
+                    enviar_mensaje(tel, alerta_asesor, config)
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo notificar asesor de comprobante: {e}")
+
+        # Actualizar estado
+        actualizar_estado_conversacion(numero, 'PEDIDO_COMPLETADO', 'comprobante_recibido', datos_pedido, config)
+        return msg_cliente
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en analizar_comprobante_pago: {e}")
+        return "Recibimos tu imagen. Un asesor la revisará y te confirmará el pago pronto."
+
+
 def actualizar_estado_conversacion(numero, contexto, accion, datos=None, config=None):
     """
     Actualiza el estado de la conversación para mantener contexto
@@ -9598,6 +9809,17 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
 
         cfg_full = load_config(config) 
         
+        # --- COMPROBANTE: Si esperamos un comprobante y llega imagen, procesarla ---
+        if es_imagen and imagen_base64:
+            estado_conv = obtener_estado_conversacion(numero, config)
+            if estado_conv and estado_conv.get('contexto') == 'ESPERANDO_COMPROBANTE':
+                app.logger.info(f"💳 [COMPROBANTE] Imagen recibida en estado ESPERANDO_COMPROBANTE para {numero}")
+                datos_pedido = estado_conv.get('datos') or {}
+                resp_comp = analizar_comprobante_pago(numero, imagen_base64, public_url, datos_pedido, config)
+                enviar_mensaje(numero, resp_comp, config)
+                registrar_respuesta_bot(numero, texto, resp_comp, config, imagen_url=public_url, es_imagen=True, incoming_saved=incoming_saved)
+                return True
+
         # --- INICIO: ANÁLISIS DE IMAGEN CON OPENAI ---
         if es_imagen and imagen_base64:
             app.logger.info(f"🖼️ Detectada imagen, llamando a OpenAI (gpt-4o) para análisis...")
@@ -10196,14 +10418,26 @@ EJEMPLOS:
                         telegram_token = config.get('telegram_token')
                         if telegram_token:
                             chat_id = numero.replace('tg_', '')
-                            send_telegram_message(chat_id, respuesta_text, telegram_token) 
+                            send_telegram_message(chat_id, respuesta_text, telegram_token)
                         else:
                             app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
                     else:
-                        enviar_mensaje(numero, respuesta_text, config) 
+                        enviar_mensaje(numero, respuesta_text, config)
                     registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
             else:
                 app.logger.info(f"ℹ️ enviar_datos_transferencia devolvió sent={sent}, omitiendo respuesta_text redundante.")
+            # Pedir comprobante y guardar estado de espera
+            msg_comp = "📎 *Por favor envía una foto o captura de pantalla de tu comprobante de transferencia* para confirmar tu pedido."
+            enviar_mensaje(numero, msg_comp, config)
+            registrar_respuesta_bot(numero, texto, msg_comp, config, incoming_saved=incoming_saved)
+            # Recuperar datos del pedido del historial para guardarlo en el estado
+            try:
+                estado_prev = obtener_estado_conversacion(numero, config)
+                datos_pedido_prev = (estado_prev.get('datos') or {}) if estado_prev else {}
+            except Exception:
+                datos_pedido_prev = {}
+            actualizar_estado_conversacion(numero, 'ESPERANDO_COMPROBANTE', 'datos_transferencia_enviados', datos_pedido_prev, config)
+            app.logger.info(f"💳 Estado ESPERANDO_COMPROBANTE guardado para {numero}")
             return True
 
         # RESPUESTA TEXTUAL (Y DE AUDIO) POR DEFECTO
