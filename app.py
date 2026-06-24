@@ -3838,7 +3838,7 @@ def guardar_cita(info_cita, config=None):
                     # Try to get advisor and their email
                     asesor = None
                     try:
-                        asesor = obtener_siguiente_asesor(config)
+                        asesor = obtener_siguiente_asesor(numero_cliente=numero, config=config)
                     except Exception as e:
                         app.logger.warning(f"⚠️ No se pudo obtener asesor para agendar: {e}")
                         asesor = None
@@ -7644,7 +7644,7 @@ def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
     # 🚀 ENVÍO DINÁMICO AL ASESOR EN TURNO
     try:
         # 1. Buscamos a quién le toca atender
-        asesor = obtener_siguiente_asesor(config)
+        asesor = obtener_siguiente_asesor(numero_cliente=numero_cliente, config=config)
         
         if asesor and asesor.get('telefono'):
             telefono_asesor = asesor['telefono']
@@ -8975,7 +8975,7 @@ Reglas: NO inventes precios; Incluye todos los productos y cantidades. Si faltan
 
         if should_notify and not already_notified and datos_compra.get('metodo_pago') and datos_compra.get('direccion') and datos_compra['precio_total'] is not None and len(productos_norm) > 0:
             try:
-                asesor = obtener_siguiente_asesor(config)
+                asesor = obtener_siguiente_asesor(numero_cliente=numero, config=config)
                 asesor_tel = asesor.get('telefono') if asesor and isinstance(asesor, dict) else None
                 asesor_email = asesor.get('email') if asesor and isinstance(asesor, dict) else None
                 cliente_mostrado = obtener_nombre_mostrado_por_numero(numero, config) or (datos_compra.get('nombre_cliente') or 'No especificado')
@@ -9057,8 +9057,9 @@ Reglas: NO inventes precios; Incluye todos los productos y cantidades. Si faltan
                         app.logger.warning(f"⚠️ No se pudo notificar a {t}: {e}")
 
                 # Marcar estado para evitar re-notificaciones
+                datos_compra_serial = {k: (float(v) if hasattr(v, '__class__') and v.__class__.__name__ == 'Decimal' else v) for k, v in datos_compra.items()}
                 nuevo_estado = {
-                    'pedido_confirmado': datos_compra,
+                    'pedido_confirmado': datos_compra_serial,
                     'pedido_notificado': True,
                     'timestamp': datetime.now().isoformat()
                 }
@@ -9847,8 +9848,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                     imagen_base64=imagen_base64,
                     caption=texto,
                     public_url=public_url,
-                    config=config,
-                    historial_inyectado=historial_final
+                    config=config
                 )
                 
                 if respuesta_vision:
@@ -10822,7 +10822,7 @@ Devuelve SOLO JSON:
             )
 
             # --- OPERACIÓN KANBAN Y ASESORES (PASO 2) ---
-            asesor = obtener_siguiente_asesor(config)
+            asesor = obtener_siguiente_asesor(numero_cliente=numero, config=config)
             destinatarios = []
 
             # 1. Añadimos al asesor que le toca
