@@ -9983,13 +9983,7 @@ EJEMPLOS:
                 return True
                 
         if intent == "INFORMACION_SERVICIOS_O_PRODUCTOS":
-            # El orquestador decidió que el usuario busca productos → buscar y enviar fichas
             app.logger.info(f"🔍 [ORQUESTADOR] intent=INFORMACION_SERVICIOS_O_PRODUCTOS → buscando fichas para '{texto}'")
-            # Primero enviamos el texto de respuesta de la IA si lo hay
-            if respuesta_text:
-                enviar_mensaje(numero, respuesta_text, config)
-                registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
-            # Luego buscamos y enviamos fichas de productos
             termino_busca = texto or ""
             precios_ficha = obtener_productos_por_palabra_clave(termino_busca, config, limite=10, contexto_ia="SI_APLICA")
             if precios_ficha:
@@ -10004,7 +9998,8 @@ EJEMPLOS:
                         if val and str(val) not in ['0', '0.0', '0.00']:
                             lineas_p.append(f"💰 *{etiqueta}:* ${val}")
                     precios_wa = "\n".join(lineas_p) if lineas_p else "💰 *Precio:* Consultar"
-                    desc_wa = (p.get('descripcion') or '')[:250]
+                    desc_wa = (p.get('descripcion') or '')[:200]
+                    # Ficha completa — se usa como caption de la imagen Y como texto si no hay imagen
                     ficha_wa = (
                         f"🔹 *{titulo_p.upper()}*\n\n"
                         f"{precios_wa}\n"
@@ -10012,18 +10007,17 @@ EJEMPLOS:
                         f"🆔 *SKU:* {sku_p}"
                     )
                     if img_url:
-                        caption_img = f"🔹 {titulo_p.upper()} | SKU: {sku_p}"
-                        enviar_imagen(numero=numero, image_url=img_url, texto=caption_img, config=config)
-                        time.sleep(0.5)
-                        enviar_mensaje(numero, ficha_wa, config)
+                        # UN solo mensaje: imagen + ficha completa como caption
+                        enviar_imagen(numero=numero, image_url=img_url, texto=ficha_wa, config=config)
                         actualizar_respuesta(numero, texto, ficha_wa, config, respuesta_tipo='imagen', respuesta_media_url=img_url)
                         time.sleep(0.8)
                     else:
                         enviar_mensaje(numero, ficha_wa, config)
             else:
                 app.logger.info(f"⚠️ [ORQUESTADOR] Sin productos encontrados para '{termino_busca}'")
-                if not respuesta_text:
-                    enviar_mensaje(numero, "No encontré productos que coincidan con tu búsqueda. ¿Puedes ser más específico?", config)
+                msg_no_prod = respuesta_text or "No encontré productos que coincidan. ¿Puedes ser más específico?"
+                enviar_mensaje(numero, msg_no_prod, config)
+                registrar_respuesta_bot(numero, texto, msg_no_prod, config, incoming_saved=incoming_saved)
             return True
 
         if intent == "COTIZAR":
