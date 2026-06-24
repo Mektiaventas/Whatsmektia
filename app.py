@@ -9569,25 +9569,6 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         return True # <-- CORTA EL FLUJO AQUÍ
     # =========================================================================
                                    
-    # 2. --- VÍA RÁPIDA DE CONTACTO (INTERCEPCIÓN TEMPRANA) ---
-    texto_norm = (texto or "").strip().lower()
-    
-    if not texto_norm and msg and 'text' in msg:
-        texto_norm = msg['text'].get('body', "").strip().lower()
-
-    patron_contacto = r"(ubic|direcc|donde\s*(estan|se\s*encuentran|se\s*ubican|es))"
-    if not es_imagen and not es_audio and re.search(patron_contacto, texto_norm):
-        app.logger.info(f"🚀 [VIA RAPIDA] Solicitud de contacto detectada: {texto_norm}")
-        
-        cfg_full = load_config(config) 
-        negocio_data = cfg_full.get('negocio', {})
-        respuesta_contacto = negocio_contact_block(negocio_data)
-        
-        enviar_mensaje(numero, respuesta_contacto, config)
-        registrar_respuesta_bot(numero, texto, respuesta_contacto, config, incoming_saved=incoming_saved)
-        
-        return True 
-
     # 2.5 --- INTERCEPCIÓN POR ASESOR HUMANO ---
     # Aquí pasamos el historial_final si la función lo requiere
     if detectar_intervencion_humana_ia(texto_norm, numero, config):
@@ -9999,7 +9980,6 @@ EJEMPLOS:
                             lineas_p.append(f"💰 *{etiqueta}:* ${val}")
                     precios_wa = "\n".join(lineas_p) if lineas_p else "💰 *Precio:* Consultar"
                     desc_wa = (p.get('descripcion') or '')[:200]
-                    # Ficha completa — se usa como caption de la imagen Y como texto si no hay imagen
                     ficha_wa = (
                         f"🔹 *{titulo_p.upper()}*\n\n"
                         f"{precios_wa}\n"
@@ -10007,7 +9987,6 @@ EJEMPLOS:
                         f"🆔 *SKU:* {sku_p}"
                     )
                     if img_url:
-                        # UN solo mensaje: imagen + ficha completa como caption
                         enviar_imagen(numero=numero, image_url=img_url, texto=ficha_wa, config=config)
                         actualizar_respuesta(numero, texto, ficha_wa, config, respuesta_tipo='imagen', respuesta_media_url=img_url)
                         time.sleep(0.8)
