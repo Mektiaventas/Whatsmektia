@@ -9855,12 +9855,22 @@ DATOS_TRANSFERENCIA → Cuando el usuario pregunta cómo pagar por transferencia
   Ejemplos: "¿a qué número te transfiero?", "me das tu cuenta", "quiero pagar por transferencia", "cuál es tu clabe"
   En ese caso el campo "transferencias" del JSON de entrada YA CONTIENE los datos bancarios — ÚSAlos en respuesta_text.
 
+ENVIAR_DOCUMENTO → Cuando el usuario pide el CATÁLOGO COMPLETO como documento/archivo, o pide un flyer, temario o PDF.
+  Ejemplos: "mándame tu catálogo", "me mandas el catálogo", "quiero el catálogo", "tienes catálogo", "mándame el PDF"
+  IMPORTANTE: "catálogo" como documento = ENVIAR_DOCUMENTO. Preguntar por un producto específico = INFORMACION_SERVICIOS_O_PRODUCTOS.
+
+INFORMACION_SERVICIOS_O_PRODUCTOS → Cuando el usuario pregunta por un producto o categoría ESPECÍFICA.
+  Ejemplos: "¿tienen sillas?", "quiero ver escritorios", "qué modelos de mesas tienen"
+  NO usar este intent cuando piden el catálogo completo.
+
 EJEMPLOS:
 ✅ Usuario: "sillas" → intent INFORMACION_SERVICIOS_O_PRODUCTOS
 ✅ Usuario: "quiero 3 sillas" → intent COTIZAR con productos_solicitados
-✅ Usuario: "¿a qué número transfiero?" → intent DATOS_TRANSFERENCIA, usa los datos de "transferencias"
+✅ Usuario: "¿a qué número transfiero?" → intent DATOS_TRANSFERENCIA
+✅ Usuario: "mándame tu catálogo" → intent ENVIAR_DOCUMENTO
+✅ Usuario: "me pasas el catálogo" → intent ENVIAR_DOCUMENTO
+❌ NO usar INFORMACION_SERVICIOS_O_PRODUCTOS cuando piden el catálogo completo
 ❌ NO buscar solo productos con categoria exactamente = "SILLA"
-❌ NO clasificar basándote solo en subcategoria
 """
         # --- User content (SIN CAMBIOS) ---
         user_content = {
