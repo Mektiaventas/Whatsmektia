@@ -6271,16 +6271,16 @@ REGLAS DE VALIDACIÓN:
 
         # Notificar al asesor — siempre, sin importar si el cliente pidió humano
         try:
-            cfg = load_config(config)
-            # Recolectar todos los teléfonos de asesores configurados
+            # Recolectar todos los teléfonos de asesores del config (ya tiene asesor1_telefono, asesor2_telefono, etc.)
+            # Excluir el número del propio cliente para evitar loops
             destinatarios = []
             for i in range(1, 5):
-                t = cfg.get(f'asesor{i}_telefono', '').strip()
-                if t and t not in destinatarios:
+                t = (config.get(f'asesor{i}_telefono') or '').strip()
+                if t and t not in destinatarios and t != numero:
                     destinatarios.append(t)
             # También tel admin si está configurado
-            tel_admin = config.get('telefono_notificaciones') or cfg.get('telefono_notificaciones', '')
-            if tel_admin and tel_admin not in destinatarios:
+            tel_admin = (config.get('telefono_notificaciones') or '').strip()
+            if tel_admin and tel_admin not in destinatarios and tel_admin != numero:
                 destinatarios.append(tel_admin)
 
             if destinatarios:
