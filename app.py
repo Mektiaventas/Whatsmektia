@@ -9085,13 +9085,43 @@ Reglas: NO inventes precios; Incluye todos los productos y cantidades. Si faltan
                         app.logger.warning(f"⚠️ No se pudo notificar a {t}: {e}")
 
                 # Marcar estado para evitar re-notificaciones
-                datos_compra_serial = {k: (float(v) if hasattr(v, '__class__') and v.__class__.__name__ == 'Decimal' else v) for k, v in datos_compra.items()}
+                def _serial(obj):
+                    if obj.__class__.__name__ == 'Decimal':
+                        return float(obj)
+                    if isinstance(obj, dict):
+                        return {k: _serial(v) for k, v in obj.items()}
+                    if isinstance(obj, list):
+                        return [_serial(i) for i in obj]
+                    return obj
+                datos_compra_serial = _serial(datos_compra)
                 nuevo_estado = {
                     'pedido_confirmado': datos_compra_serial,
                     'pedido_notificado': True,
                     'timestamp': datetime.now().isoformat()
                 }
                 actualizar_estado_conversacion(numero, "PEDIDO_CONFIRMADO", "pedido_notificado", nuevo_estado, config)
+
+                # Si el pago es por transferencia, solicitar comprobante
+                metodo = str(datos_compra.get('metodo_pago') or '').lower()
+                if 'transfer' in metodo:
+                    try:
+                        transferencia_num = config.get('transferencia_numero', '')
+                        transferencia_nombre = config.get('transferencia_nombre', '')
+                        transferencia_banco = config.get('transferencia_banco', '')
+                        msg_transfer = (
+                            f"Para completar tu pedido, realiza tu transferencia a:\n\n"
+                            f"• *CLABE/Número:* {transferencia_num}\n"
+                            f"• *Beneficiario:* {transferencia_nombre}\n"
+                            f"• *Banco:* {transferencia_banco}\n"
+                            f"• *Monto:* ${datos_compra['precio_total']:,.2f}\n\n"
+                            f"📎 *Por favor envía una foto o captura de pantalla de tu comprobante de pago.*"
+                        )
+                        enviar_mensaje(numero, msg_transfer, config)
+                        actualizar_estado_conversacion(numero, "ESPERANDO_COMPROBANTE", "esperando_comprobante", {"monto_esperado": float(datos_compra['precio_total']), "pedido": datos_compra_serial}, config)
+                        app.logger.info(f"💳 Estado ESPERANDO_COMPROBANTE seteado para {numero} desde comprar_producto")
+                        respuesta_al_cliente = None  # evitar doble mensaje
+                    except Exception as e_tr:
+                        app.logger.warning(f"⚠️ No se pudo enviar instrucciones de transferencia: {e_tr}")
 
                 # If at least one notification was successfully sent, move the chat to "Resueltos" (closed)
                 try:
