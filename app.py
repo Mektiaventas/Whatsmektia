@@ -6147,21 +6147,38 @@ REGLAS DE VALIDACIÓN:
         elif imagen_base64:
             imagen_data = imagen_base64
 
-        if not GEMINI_API_KEY:
-            app.logger.warning("⚠️ GEMINI_API_KEY no configurada, usando OpenAI como fallback")
-            raise ValueError("No GEMINI_API_KEY")
-
-        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
-        parts = [{"text": prompt_vision}]
+        # Construir mensaje para OpenAI vision
+        content_parts = [{"type": "text", "text": prompt_vision}]
         if imagen_data:
-            parts.append({"inline_data": {"mime_type": mime_type, "data": imagen_data}})
+            content_parts.append({"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{imagen_data}", "detail": "low"}})
         elif public_url:
-            parts.append({"text": f"\n[Imagen disponible en: {public_url}]"})
+            content_parts.append({"type": "image_url", "image_url": {"url": public_url, "detail": "low"}})
 
-        gemini_payload = {"contents": [{"parts": parts}], "generationConfig": {"temperature": 0.0, "maxOutputTokens": 600}}
-        resp = requests.post(gemini_url, json=gemini_payload, timeout=30)
-        resp.raise_for_status()
-        raw = resp.json()['candidates'][0]['content']['parts'][0]['text'].strip()
+        openai_payload = {
+            "messages": [{"role": "user", "content": content_parts}],
+            "temperature": 0.0,
+            "max_tokens": 600
+        }
+
+        raw = None
+        for modelo_oai in ["gpt-4o-mini", "gpt-4o"]:
+            openai_payload["model"] = modelo_oai
+            try:
+                resp = requests.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
+                    json=openai_payload,
+                    timeout=30
+                )
+                resp.raise_for_status()
+                raw = resp.json()['choices'][0]['message']['content'].strip()
+                app.logger.info(f"✅ Comprobante analizado con {modelo_oai}")
+                break
+            except Exception as e:
+                app.logger.warning(f"⚠️ OpenAI {modelo_oai} falló al analizar comprobante: {e}")
+
+        if not raw:
+            raise ValueError("OpenAI no respondió al analizar comprobante")
 
         match = re.search(r'\{.*\}', raw, re.DOTALL)
         datos_comp = json.loads(match.group(0)) if match else {}
