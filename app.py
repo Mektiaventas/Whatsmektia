@@ -6251,7 +6251,7 @@ REGLAS DE VALIDACIÓN:
             msg_cliente = (
                 f"✅ *¡Comprobante recibido y validado!*\n\n"
                 f"📋 *Detalles detectados:*\n"
-                f"• Monto: ${monto_det:,.2f if monto_det else '?'}\n"
+                f"• Monto: ${f'{monto_det:,.2f}' if monto_det else '?'}\n"
                 f"• Banco origen: {datos_comp.get('banco_origen', 'N/D')}\n"
                 f"• Referencia: {datos_comp.get('referencia', 'N/D')}\n\n"
                 f"¡Gracias, {nombre_cliente}! Tu pedido está confirmado. "
@@ -6262,7 +6262,7 @@ REGLAS DE VALIDACIÓN:
             if not datos_comp.get('coincide_cuenta'):
                 razones.append(f"la cuenta destino no coincide con nuestra cuenta (terminación *{ultimos_digitos}*)")
             if not datos_comp.get('coincide_monto'):
-                razones.append(f"el monto detectado (${monto_det:,.2f if monto_det else '?'}) no coincide con el total del pedido ({monto_str})")
+                razones.append(f"el monto detectado (${f'{monto_det:,.2f}' if monto_det else '?'}) no coincide con el total del pedido ({monto_str})")
             razon_txt = " y ".join(razones) if razones else "no pudo validarse automáticamente"
             msg_cliente = (
                 f"⚠️ Recibimos tu comprobante, pero {razon_txt}.\n\n"
@@ -6280,7 +6280,7 @@ REGLAS DE VALIDACIÓN:
                 alerta_asesor = (
                     f"💳 *Comprobante de pago recibido* {estado_icon}\n\n"
                     f"👤 *Cliente:* {nombre_cliente} ({numero})\n"
-                    f"💵 *Monto detectado:* ${monto_det:,.2f if monto_det else 'N/D'}\n"
+                    f"💵 *Monto detectado:* ${f'{monto_det:,.2f}' if monto_det else 'N/D'}\n"
                     f"💵 *Monto esperado:* {monto_str}\n"
                     f"🏦 *Banco origen:* {datos_comp.get('banco_origen', 'N/D')}\n"
                     f"🏦 *Banco destino:* {datos_comp.get('banco_destino', 'N/D')}\n"
