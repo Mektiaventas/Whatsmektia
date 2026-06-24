@@ -6271,16 +6271,30 @@ REGLAS DE VALIDACIÓN:
 
         # Notificar al asesor — siempre, sin importar si el cliente pidió humano
         try:
+            app.logger.info(f"🔍 DEBUG asesores config: asesor1={config.get('asesor1_telefono')!r} asesor2={config.get('asesor2_telefono')!r} asesores_json={str(config.get('asesores_json',''))[:80]!r}")
             # Recolectar todos los teléfonos de asesores del config (ya tiene asesor1_telefono, asesor2_telefono, etc.)
             # Excluir el número del propio cliente para evitar loops
             destinatarios = []
             for i in range(1, 5):
                 t = (config.get(f'asesor{i}_telefono') or '').strip()
-                if t and t not in destinatarios and t != numero:
+                if t and t not in destinatarios:
                     destinatarios.append(t)
+            # Intentar también desde asesores_json si los campos individuales están vacíos
+            if not destinatarios:
+                try:
+                    import json as _json
+                    asesores_raw = config.get('asesores_json') or config.get('asesores_list') or '[]'
+                    if isinstance(asesores_raw, str):
+                        asesores_raw = _json.loads(asesores_raw)
+                    for a in (asesores_raw if isinstance(asesores_raw, list) else []):
+                        t = (a.get('telefono') or '').strip()
+                        if t and t not in destinatarios:
+                            destinatarios.append(t)
+                except Exception:
+                    pass
             # También tel admin si está configurado
             tel_admin = (config.get('telefono_notificaciones') or '').strip()
-            if tel_admin and tel_admin not in destinatarios and tel_admin != numero:
+            if tel_admin and tel_admin not in destinatarios:
                 destinatarios.append(tel_admin)
 
             if destinatarios:
