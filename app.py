@@ -6269,12 +6269,20 @@ REGLAS DE VALIDACIÓN:
                 f"Un asesor lo revisará manualmente y te confirmará en breve."
             )
 
-        # Notificar al asesor
+        # Notificar al asesor — siempre, sin importar si el cliente pidió humano
         try:
-            asesor = obtener_siguiente_asesor(numero_cliente=numero, config=config)
-            asesor_tel = asesor.get('telefono') if asesor and isinstance(asesor, dict) else None
-            tel_admin = config.get('telefono_notificaciones')
-            destinatarios = list({t for t in [asesor_tel, tel_admin] if t})
+            cfg = load_config(config)
+            # Recolectar todos los teléfonos de asesores configurados
+            destinatarios = []
+            for i in range(1, 5):
+                t = cfg.get(f'asesor{i}_telefono', '').strip()
+                if t and t not in destinatarios:
+                    destinatarios.append(t)
+            # También tel admin si está configurado
+            tel_admin = config.get('telefono_notificaciones') or cfg.get('telefono_notificaciones', '')
+            if tel_admin and tel_admin not in destinatarios:
+                destinatarios.append(tel_admin)
+
             if destinatarios:
                 estado_icon = "✅" if es_valido else "⚠️"
                 alerta_asesor = (
@@ -6291,11 +6299,17 @@ REGLAS DE VALIDACIÓN:
                     f"Cuenta ✓: {'Sí' if datos_comp.get('coincide_cuenta') else 'No'} | "
                     f"Banco ✓: {'Sí' if datos_comp.get('coincide_banco') else 'No'} | "
                     f"Monto ✓: {'Sí' if datos_comp.get('coincide_monto') else 'No'}\n"
-                    f"*Válido automático:* {'Sí' if es_valido else 'No — revisar manualmente'}\n\n"
-                    f"📎 {public_url or 'imagen no disponible'}"
+                    f"*Válido automático:* {'Sí' if es_valido else 'No — revisar manualmente'}"
                 )
+                img_url_publica = public_url if public_url and public_url.startswith('http') else None
                 for tel in destinatarios:
-                    enviar_mensaje(tel, alerta_asesor, config)
+                    if img_url_publica:
+                        enviar_imagen(numero=tel, image_url=img_url_publica, texto=alerta_asesor, config=config)
+                    else:
+                        enviar_mensaje(tel, alerta_asesor, config)
+                app.logger.info(f"💳 Notificación de comprobante enviada a: {destinatarios}")
+            else:
+                app.logger.warning("⚠️ No hay asesores configurados para notificar comprobante")
         except Exception as e:
             app.logger.warning(f"⚠️ No se pudo notificar asesor de comprobante: {e}")
 
