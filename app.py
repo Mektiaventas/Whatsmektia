@@ -6089,7 +6089,7 @@ def analizar_comprobante_pago(numero, imagen_base64, public_url, datos_pedido, c
     Retorna texto de respuesta para el cliente.
     """
     try:
-        monto_esperado = datos_pedido.get('precio_total')
+        monto_esperado = datos_pedido.get('precio_total') or datos_pedido.get('monto_esperado')
         nombre_cliente = datos_pedido.get('nombre_cliente', 'Cliente')
 
         # Obtener datos de transferencia del negocio para validar contra ellos
@@ -6305,9 +6305,10 @@ REGLAS DE VALIDACIÓN:
                     f"💵 *Monto detectado:* ${f'{monto_det:,.2f}' if monto_det else 'N/D'}\n"
                     f"💵 *Monto esperado:* {monto_str}\n"
                     f"🏦 *Banco origen:* {datos_comp.get('banco_origen', 'N/D')}\n"
-                    f"🏦 *Banco destino:* {datos_comp.get('banco_destino', 'N/D')}\n"
+                    f"🏦 *Banco destino (comprobante):* {datos_comp.get('banco_destino', 'N/D')}\n"
                     f"👤 *Beneficiario en comprobante:* {datos_comp.get('beneficiario', 'N/D')}\n"
-                    f"🔢 *Cuenta visible:* {datos_comp.get('cuenta_destino_visible', 'N/D')}\n"
+                    f"🔢 *Nuestra cuenta:* ...{cuenta_esperada[-4:] if len(cuenta_esperada) >= 4 else cuenta_esperada}\n"
+                    f"🔢 *Cuenta en comprobante:* {datos_comp.get('cuenta_destino_visible', 'N/D')}\n"
                     f"🔖 *Referencia:* {datos_comp.get('referencia', 'N/D')}\n"
                     f"📅 *Fecha:* {datos_comp.get('fecha', 'N/D')}\n\n"
                     f"Cuenta ✓: {'Sí' if datos_comp.get('coincide_cuenta') else 'No'} | "
