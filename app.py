@@ -9476,7 +9476,6 @@ def generar_respuesta_deepseek(numero, texto, precios, historial_final, config, 
             asesor_asignado = obtener_asesor_actual(numero, config=config)
 
             if not asesor_asignado or asesor_asignado.lower() == 'ia':
-                from funciones_asesor import pasar_contacto_asesor
                 pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
             
             from whatsapp import enviar_mensaje
@@ -9672,22 +9671,11 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 historial_text += f"Asistente: {h.get('respuesta')}\n"
 
         # ================================================================
-        # 🎯 ORQUESTADOR: DECISIÓN DE RUTA
-        # fichas_ia_total siempre va primero:
-        #   - Si encuentra productos → manda ficha (texto + imagen si hay)
-        #   - Si no encuentra nada → delega a DeepSeek
+        # 🎯 ORQUESTADOR: el DeepSeek principal decide el intent
+        #    fichas_ia_total ya NO intercepta aquí — solo se llama cuando
+        #    el orquestador decide INFORMACION_SERVICIOS_O_PRODUCTOS
         # ================================================================
-        app.logger.info(f"🎯 [ORQUESTADOR] Evaluando mensaje con fichas_ia_total para {numero}")
-        if fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_final=historial_final):
-            app.logger.info(f"✅ [ORQUESTADOR] Fichas enviadas, cerrando flujo para {numero}")
-            return True
-        app.logger.info(f"ℹ️ [ORQUESTADOR] Sin productos relevantes → delegando a DeepSeek para {numero}")
-        # ================================================================
-        # ================================================================
-        # 🛠️ INSERTA ESTAS LÍNEAS AQUÍ PARA REPARAR LAS VARIABLES DEFECTUOSAS
-        # ================================================================
-        # Nota: Busca en tu código cómo se llama tu función para traer los productos. 
-        # Si no la encuentras rápido, deja temporalmente 'precios = []' para probar que no truene.
+        app.logger.info(f"🎯 [ORQUESTADOR] Evaluando mensaje para {numero}")
         precios = obtener_todos_los_precios(config) or [] 
         producto_aplica = "SI_APLICA" 
         # ================================================================
@@ -9936,18 +9924,6 @@ EJEMPLOS:
             return False
         intent = (decision.get('intent') or 'NO_ACTION').upper()
 
-        # --- INTERCEPCIÓN BANCARIA: si el usuario pide datos de pago/transferencia, forzar intent ---
-        _texto_lower_bank = (texto or "").lower()
-        _keywords_bank = [
-            "número de cuenta", "numero de cuenta", "clabe", "cuenta bancaria",
-            "a qué número", "a que numero", "transferencia", "transfiero", "deposito",
-            "depósito", "datos de pago", "datos bancarios", "banco", "pagar con transferencia",
-            "cómo pago", "como pago", "formas de pago", "forma de pago"
-        ]
-        if intent not in ("DATOS_TRANSFERENCIA", "PASAR_ASESOR") and any(kw in _texto_lower_bank for kw in _keywords_bank):
-            app.logger.info(f"🏦 [INTERCEPCION BANCARIA] Forzando DATOS_TRANSFERENCIA para '{texto[:60]}'")
-            intent = "DATOS_TRANSFERENCIA"
-
         # --- Recalcular interés basado en contexto IA ---
         nivel_interes_ia = (decision.get('nivel_interes') or 'BAJO').upper()
         try:
@@ -9994,6 +9970,50 @@ EJEMPLOS:
                 registrar_respuesta_bot(numero, texto, fallback_msg_catalog, config, incoming_saved=incoming_saved)
                 return True
                 
+        if intent == "INFORMACION_SERVICIOS_O_PRODUCTOS":
+            # El orquestador decidió que el usuario busca productos → buscar y enviar fichas
+            app.logger.info(f"🔍 [ORQUESTADOR] intent=INFORMACION_SERVICIOS_O_PRODUCTOS → buscando fichas para '{texto}'")
+            # Primero enviamos el texto de respuesta de la IA si lo hay
+            if respuesta_text:
+                enviar_mensaje(numero, respuesta_text, config)
+                registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
+            # Luego buscamos y enviamos fichas de productos
+            termino_busca = texto or ""
+            precios_ficha = obtener_productos_por_palabra_clave(termino_busca, config, limite=10, contexto_ia="SI_APLICA")
+            if precios_ficha:
+                productos_para_ficha = precios_ficha[:3]
+                for p in productos_para_ficha:
+                    img_url = p.get('imagen')
+                    sku_p = p.get('sku', '') or 'S/N'
+                    titulo_p = p.get('servicio') or p.get('modelo') or 'Producto'
+                    lineas_p = []
+                    for llave, etiqueta in [('precio_menudeo', 'Menudeo'), ('precio_mayoreo', 'Mayoreo'), ('inscripcion', 'Inscripción'), ('mensualidad', 'Mensualidad'), ('precio', 'Precio')]:
+                        val = p.get(llave)
+                        if val and str(val) not in ['0', '0.0', '0.00']:
+                            lineas_p.append(f"💰 *{etiqueta}:* ${val}")
+                    precios_wa = "\n".join(lineas_p) if lineas_p else "💰 *Precio:* Consultar"
+                    desc_wa = (p.get('descripcion') or '')[:250]
+                    ficha_wa = (
+                        f"🔹 *{titulo_p.upper()}*\n\n"
+                        f"{precios_wa}\n"
+                        f"📝 {desc_wa}\n\n"
+                        f"🆔 *SKU:* {sku_p}"
+                    )
+                    if img_url:
+                        caption_img = f"🔹 {titulo_p.upper()} | SKU: {sku_p}"
+                        enviar_imagen(numero=numero, image_url=img_url, texto=caption_img, config=config)
+                        time.sleep(0.5)
+                        enviar_mensaje(numero, ficha_wa, config)
+                        actualizar_respuesta(numero, texto, ficha_wa, config, respuesta_tipo='imagen', respuesta_media_url=img_url)
+                        time.sleep(0.8)
+                    else:
+                        enviar_mensaje(numero, ficha_wa, config)
+            else:
+                app.logger.info(f"⚠️ [ORQUESTADOR] Sin productos encontrados para '{termino_busca}'")
+                if not respuesta_text:
+                    enviar_mensaje(numero, "No encontré productos que coincidan con tu búsqueda. ¿Puedes ser más específico?", config)
+            return True
+
         if intent == "COTIZAR":
             # Intentar calcular sumatoria directa si la IA devolvió productos_solicitados con cantidades
             productos_sol = decision.get('productos_solicitados') or []
@@ -10333,12 +10353,15 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
                 if resp_h: historial_text += f"A: {resp_h}\n"
 
         ds_prompt = (
-            "Eres un vendedor experto. Tu misión es clasificar la intención del usuario.\n"
+            "Eres un clasificador de intenciones. Responde SOLO con una de las opciones indicadas.\n"
             "Instrucciones:\n"
-            "1. Si busca un producto, responde: SEARCH: <término preciso>\n"
-            "2. Si la intención implica VER el producto, agrega: | SHOW: YES\n"
-            "3. Si pide hablar con un asesor, responde: TRANSFERIR_ASESOR\n"
-            "4. Si quiere agendar cita, responde: AGENDAR_CITA.\n\n"
+            "1. Si busca un producto específico (silla, escritorio, curso, etc), responde: SEARCH: <término preciso>\n"
+            "2. Si la intención implica VER la imagen del producto, agrega: | SHOW: YES\n"
+            "3. Si pide EXPLÍCITAMENTE hablar con un asesor o persona humana, responde: TRANSFERIR_ASESOR\n"
+            "4. Si quiere agendar una cita, responde: AGENDAR_CITA\n"
+            "5. Para CUALQUIER OTRO mensaje (saludos, preguntas generales, precios, transferencias, pagos, datos bancarios, catálogo, etc), responde: RESPONDER_TEXTO\n\n"
+            "IMPORTANTE: Solo usa TRANSFERIR_ASESOR si el usuario dice explícitamente 'quiero hablar con alguien', 'comunicame con un asesor', etc.\n"
+            "Para preguntas de pago, transferencia o datos bancarios → RESPONDER_TEXTO\n\n"
             "HISTORIAL:\n"
             f"{historial_text.strip()}\n\n"
             "MENSAJE ACTUAL:\n"
@@ -10390,10 +10413,16 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
         elif "TRANSFERIR_ASESOR" in raw_ds.upper():
             fue_transferido = pasar_contacto_asesor(numero, config=config, notificar_asesor=True, historial_final=historial_final)
             if fue_transferido: return True
-            else:
-                generar_respuesta_deepseek(numero=numero, texto=texto, precios=[], historial_final=historial_final, config=config, incoming_saved=incoming_saved, es_audio=es_audio)
-                return True
-        
+            # Si no hay asesor disponible, caer al flujo normal de IA
+            # (no llamar generar_respuesta_deepseek aquí para evitar doble respuesta)
+            producto_aplica = "NO_APLICA"
+
+        elif "RESPONDER_TEXTO" in raw_ds.upper():
+            # Mensaje general: saludo, datos bancarios, preguntas de pago, etc.
+            # Dejamos producto_aplica = NO_APLICA para que caiga a procesar_mensaje_unificado
+            app.logger.info(f"💬 [MODO FICHAS] Clasificado como RESPONDER_TEXTO, delegando a flujo IA principal.")
+            producto_aplica = "NO_APLICA"
+
         elif "SI_APLICA" in raw_ds:
             producto_aplica = "SI_APLICA"
 
@@ -10418,10 +10447,11 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
             else:
                 productos_para_ficha = precios[:3]
 
-    # Si no hay productos, delegar a respuesta normal de la IA (No interrumpe simulaciones externas)
+    # Si no hay fichas de productos, devolver False para que procesar_mensaje_unificado
+    # continúe con su flujo completo (DATOS_TRANSFERENCIA, COTIZAR, IA principal, etc.)
     if not productos_para_ficha:
-        generar_respuesta_deepseek(numero=numero, texto=texto, precios=precios, historial_final=historial_final, config=config, incoming_saved=incoming_saved, es_audio=es_audio)
-        return True
+        app.logger.info(f"💬 [MODO FICHAS] Sin fichas para {numero}, delegando a flujo IA completo.")
+        return False
 
     # Bloque Unificado de envío (Imagen + Texto)
     for p in productos_para_ficha:
