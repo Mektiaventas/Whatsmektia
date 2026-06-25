@@ -70,15 +70,15 @@ def public_image_url(imagen_url):
         if not fname:
             return imagen_url
 
-        # Priorizar la búsqueda en la carpeta de subidas general /uploads/
-        # (para chats de usuarios) y si falla, buscar en /uploads/productos/
+        # Priorizar /uploads/ para imágenes de WhatsApp (comprobantes, fotos de usuarios)
+        # y si falla, buscar en /uploads/productos/ para fichas de productos
         try:
-            # Intento 1: Servir desde /uploads/ (usando 'serve_uploaded_file')
-            return url_for('serve_product_image', filename=fname)
+            # Intento 1: Servir desde /uploads/ (imágenes de WhatsApp)
+            return url_for('serve_uploaded_file', filename=fname)
         except Exception:
-            # Intento 2: Fallback a /uploads/productos/ (usando 'serve_product_image')
+            # Intento 2: Fallback a /uploads/productos/ (imágenes de productos)
             try:
-                return url_for('serve_uploaded_file', filename=fname)
+                return url_for('serve_product_image', filename=fname)
             except Exception:
                 # Si ambos fallan, devuelve el nombre del archivo (probablemente roto)
                 return imagen_url
