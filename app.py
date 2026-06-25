@@ -9984,6 +9984,62 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 app.logger.error(traceback.format_exc())
                 return False
 
+        # --- REFINANDO_BUSQUEDA: si el cliente respondió la pregunta de filtrado, buscar con filtro ---
+        if not es_imagen:
+            try:
+                _estado_ref = obtener_estado_conversacion(numero, config)
+                if _estado_ref and _estado_ref.get('contexto') == 'REFINANDO_BUSQUEDA':
+                    _datos_ref = _estado_ref.get('datos') or {}
+                    _skus_guardados = _datos_ref.get('skus', [])
+                    _termino_orig = _datos_ref.get('termino', '')
+                    app.logger.info(f"🔎 [REFINANDO] Respuesta del cliente para búsqueda '{_termino_orig}': '{texto}'")
+                    # Limpiar estado para no quedar en loop
+                    actualizar_estado_conversacion(numero, 'IDLE', 'idle', {}, config)
+                    # Buscar con el término original + la respuesta del cliente como filtro adicional
+                    _termino_refinado = f"{_termino_orig} {texto}"
+                    _productos_ref = obtener_productos_por_palabra_clave(_termino_refinado, config, limite=10, contexto_ia="SI_APLICA")
+                    # Si no encontró nada con el término combinado, usar los guardados y filtrar por texto
+                    if not _productos_ref and _skus_guardados:
+                        _conn_ref = get_db_connection(config)
+                        _cur_ref = _conn_ref.cursor(dictionary=True)
+                        _ph = ','.join(['%s'] * len(_skus_guardados))
+                        _cur_ref.execute(f"SELECT * FROM precios WHERE sku IN ({_ph})", _skus_guardados)
+                        _todos = _cur_ref.fetchall()
+                        _cur_ref.close()
+                        _conn_ref.close()
+                        _txt_low = texto.lower()
+                        _productos_ref = [p for p in _todos if _txt_low in (p.get('descripcion') or '').lower()
+                                          or _txt_low in (p.get('linea') or '').lower()
+                                          or _txt_low in (p.get('subcategoria') or '').lower()] or _todos
+                    _productos_ref = _productos_ref[:3]
+                    if _productos_ref:
+                        app.logger.info(f"✅ [REFINANDO] {len(_productos_ref)} productos tras filtro")
+                        for _p in _productos_ref:
+                            _img = _p.get('imagen')
+                            _titulo = _p.get('servicio') or _p.get('modelo') or 'Producto'
+                            _sku_p = _p.get('sku', '') or 'S/N'
+                            _lineas_p = []
+                            for _llave, _etiq in [('precio_menudeo', 'Menudeo'), ('precio_mayoreo', 'Mayoreo'), ('precio', 'Precio')]:
+                                _val = _p.get(_llave)
+                                if _val and str(_val) not in ['0', '0.0', '0.00']:
+                                    _lineas_p.append(f"💰 *{_etiq}:* ${_val}")
+                            _precios_wa = "\n".join(_lineas_p) if _lineas_p else "💰 *Precio:* Consultar"
+                            _desc_wa = (_p.get('descripcion') or '')[:200]
+                            _ficha = (f"🔹 *{_titulo.upper()}*\n\n{_precios_wa}\n📝 {_desc_wa}\n\n🆔 *SKU:* {_sku_p}")
+                            if _img:
+                                enviar_imagen(numero=numero, image_url=_img, texto=_ficha, config=config)
+                                actualizar_respuesta(numero, texto, _ficha, config, respuesta_tipo='imagen', respuesta_media_url=_img)
+                                time.sleep(0.8)
+                            else:
+                                enviar_mensaje(numero, _ficha, config)
+                    else:
+                        _msg_nf = "No encontré opciones con esa preferencia. ¿Puedes darme más detalles?"
+                        enviar_mensaje(numero, _msg_nf, config)
+                        registrar_respuesta_bot(numero, texto, _msg_nf, config, incoming_saved=incoming_saved)
+                    return True
+            except Exception as _e_ref:
+                app.logger.warning(f"⚠️ Error en handler REFINANDO_BUSQUEDA: {_e_ref}")
+
         # --- PREPARAR CONTEXTO USANDO LA VARIABLE INYECTADA (BORRADA LA LLAMADA A BD) ---
         historial_text = ""
         for h in historial_final: # <--- Usamos historial_final directamente
@@ -10307,6 +10363,28 @@ EJEMPLOS:
             termino_busca = texto or ""
             precios_ficha = obtener_productos_por_palabra_clave(termino_busca, config, limite=10, contexto_ia="SI_APLICA")
             if precios_ficha:
+                # Si hay 2+ productos y el cliente no dio características específicas → preguntar primero
+                _tiene_caracteristicas = any(c in texto.lower() for c in ['negro', 'blanco', 'gris', 'cafe', 'madera', 'metal', 'tela', 'piel', 'mesh', 'alto', 'bajo', 'grande', 'chico', 'pequeño'])
+                if len(precios_ficha) >= 2 and not _tiene_caracteristicas:
+                    # Extraer opciones diferenciадoras de línea/subcategoría
+                    _opciones_set = []
+                    for _p in precios_ficha[:6]:
+                        _op = (_p.get('linea') or _p.get('subcategoria') or '').strip()
+                        if _op and _op.upper() not in [o.upper() for o in _opciones_set]:
+                            _opciones_set.append(_op)
+                    _skus_guardar = [p.get('sku') for p in precios_ficha if p.get('sku')]
+                    if _opciones_set and len(_opciones_set) >= 2:
+                        # Hay opciones diferenciадoras → preguntar
+                        _opciones_txt = ' / '.join(_opciones_set[:4])
+                        _cat_nombre = (precios_ficha[0].get('categoria') or termino_busca).strip().lower()
+                        _pregunta = f"¡Tenemos varias opciones! Para mostrarte las más adecuadas, ¿qué tipo de {_cat_nombre} buscas?\n\n*{_opciones_txt}*"
+                        actualizar_estado_conversacion(numero, 'REFINANDO_BUSQUEDA', 'refinando_busqueda', {'skus': _skus_guardar, 'termino': termino_busca}, config)
+                        enviar_mensaje(numero, _pregunta, config)
+                        registrar_respuesta_bot(numero, texto, _pregunta, config, incoming_saved=incoming_saved)
+                        app.logger.info(f"🔎 [REFINANDO] Pregunta enviada con {len(_opciones_set)} opciones para '{termino_busca}'")
+                        return True
+
+                # Sin ambigüedad o con características específicas → mostrar directo
                 productos_para_ficha = precios_ficha[:3]
                 for p in productos_para_ficha:
                     img_url = p.get('imagen')
