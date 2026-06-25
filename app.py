@@ -9995,11 +9995,9 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                     app.logger.info(f"🔎 [REFINANDO] Respuesta del cliente para búsqueda '{_termino_orig}': '{texto}'")
                     # Limpiar estado para no quedar en loop
                     actualizar_estado_conversacion(numero, 'IDLE', 'idle', {}, config)
-                    # Buscar con el término original + la respuesta del cliente como filtro adicional
-                    _termino_refinado = f"{_termino_orig} {texto}"
-                    _productos_ref = obtener_productos_por_palabra_clave(_termino_refinado, config, limite=10, contexto_ia="SI_APLICA")
-                    # Si no encontró nada con el término combinado, usar los guardados y filtrar por texto
-                    if not _productos_ref and _skus_guardados:
+                    _txt_low = texto.lower()
+                    if _skus_guardados:
+                        # Filtrar directamente desde los SKUs guardados (más preciso)
                         _conn_ref = get_db_connection(config)
                         _cur_ref = _conn_ref.cursor(dictionary=True)
                         _ph = ','.join(['%s'] * len(_skus_guardados))
@@ -10007,10 +10005,15 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                         _todos = _cur_ref.fetchall()
                         _cur_ref.close()
                         _conn_ref.close()
-                        _txt_low = texto.lower()
-                        _productos_ref = [p for p in _todos if _txt_low in (p.get('descripcion') or '').lower()
-                                          or _txt_low in (p.get('linea') or '').lower()
-                                          or _txt_low in (p.get('subcategoria') or '').lower()] or _todos
+                        _productos_ref = [p for p in _todos if _txt_low in (p.get('linea') or '').lower()
+                                          or _txt_low in (p.get('modelo') or '').lower()
+                                          or _txt_low in (p.get('subcategoria') or '').lower()
+                                          or _txt_low in (p.get('descripcion') or '').lower()]
+                        if not _productos_ref:
+                            _productos_ref = _todos  # si nada coincide, mandar todos los guardados
+                    else:
+                        _termino_refinado = f"{_termino_orig} {texto}"
+                        _productos_ref = obtener_productos_por_palabra_clave(_termino_refinado, config, limite=10, contexto_ia="SI_APLICA")
                     _productos_ref = _productos_ref[:3]
                     if _productos_ref:
                         app.logger.info(f"✅ [REFINANDO] {len(_productos_ref)} productos tras filtro")
