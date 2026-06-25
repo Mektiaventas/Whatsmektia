@@ -10366,12 +10366,22 @@ EJEMPLOS:
                 # Si hay 2+ productos y el cliente no dio características específicas → preguntar primero
                 _tiene_caracteristicas = any(c in texto.lower() for c in ['negro', 'blanco', 'gris', 'cafe', 'madera', 'metal', 'tela', 'piel', 'mesh', 'alto', 'bajo', 'grande', 'chico', 'pequeño'])
                 if len(precios_ficha) >= 2 and not _tiene_caracteristicas:
-                    # Extraer opciones diferenciадoras de línea/subcategoría
+                    # Detectar automáticamente cuál columna es mejor diferenciador
+                    # Criterio: 2+ valores distintos, descriptivos (len > 3), no códigos cortos
+                    def _es_descriptivo(vals):
+                        if len(vals) < 2:
+                            return False
+                        return sum(1 for v in vals if len(v) > 3) >= 2
                     _opciones_set = []
-                    for _p in precios_ficha[:6]:
-                        _op = (_p.get('linea') or _p.get('subcategoria') or '').strip()
-                        if _op and _op.upper() not in [o.upper() for o in _opciones_set]:
-                            _opciones_set.append(_op)
+                    for _col in ['categoria', 'subcategoria', 'linea', 'modelo']:
+                        _vals = []
+                        for _p in precios_ficha[:6]:
+                            _v = (_p.get(_col) or '').strip()
+                            if _v and _v.upper() not in [x.upper() for x in _vals]:
+                                _vals.append(_v)
+                        if _es_descriptivo(_vals):
+                            _opciones_set = _vals
+                            break
                     _skus_guardar = [p.get('sku') for p in precios_ficha if p.get('sku')]
                     if _opciones_set and len(_opciones_set) >= 2:
                         # Hay opciones diferenciадoras → preguntar
