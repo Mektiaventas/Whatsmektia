@@ -5669,9 +5669,12 @@ def obtener_productos_por_palabra_clave(palabra_clave, config=None, limite=150, 
                     return [producto_exacto]
         
         # ========== PASO 4: BÚSQUEDA MULTICAPA INTELIGENTE ==========
-        
+
         # Construir query dinámica basada en palabras clave
-        
+        # Si la IA ya normalizó categorías (ej. 'escritorios' → 'escritorio'), usarlas
+        if tipo_busqueda['tipo'] == 'categoria' and tipo_busqueda.get('categoria_terminos'):
+            palabras_clave = tipo_busqueda['categoria_terminos']
+
         if not palabras_clave:
             app.logger.warning("⚠️ No se pudieron extraer palabras clave, usando búsqueda amplia")
             palabras_clave = [normalizar_texto_busqueda(texto_limpio)]
