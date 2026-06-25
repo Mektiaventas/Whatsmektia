@@ -10260,7 +10260,7 @@ EJEMPLOS:
             _conn_interes = get_db_connection(config)
             if _conn_interes:
                 _cur = _conn_interes.cursor()
-                _cur.execute("UPDATE contactos SET interes=%s WHERE numero=%s", (nivel_interes_ia, numero))
+                _cur.execute("UPDATE contactos SET interes=%s WHERE numero_telefono=%s", (nivel_interes_ia, numero))
                 _conn_interes.commit()
                 _cur.close()
                 _conn_interes.close()
