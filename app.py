@@ -6184,7 +6184,39 @@ REGLAS DE VALIDACIÓN:
         datos_comp = json.loads(match.group(0)) if match else {}
 
         if not datos_comp.get('es_comprobante'):
-            return "La imagen que enviaste no parece ser un comprobante de pago. ¿Puedes enviar una captura clara de tu transferencia?"
+            # Notificar al asesor de todas formas para que revise manualmente
+            try:
+                destinatarios_rev = []
+                for i in range(1, 5):
+                    t = (config.get(f'asesor{i}_telefono') or '').strip()
+                    if t and t not in destinatarios_rev:
+                        destinatarios_rev.append(t)
+                if not destinatarios_rev:
+                    try:
+                        import json as _j2
+                        asesores_raw2 = config.get('asesores_json') or '[]'
+                        if isinstance(asesores_raw2, str):
+                            asesores_raw2 = _j2.loads(asesores_raw2)
+                        for a in (asesores_raw2 if isinstance(asesores_raw2, list) else []):
+                            t = (a.get('telefono') or '').strip()
+                            if t and t not in destinatarios_rev:
+                                destinatarios_rev.append(t)
+                    except Exception:
+                        pass
+                if destinatarios_rev:
+                    alerta_rev = (
+                        f"📸 *Imagen recibida de cliente* (posible comprobante)\n\n"
+                        f"👤 *Cliente:* {nombre_cliente} ({numero})\n"
+                        f"⚠️ No se detectó automáticamente como comprobante. Por favor revisa manualmente."
+                    )
+                    for tel in destinatarios_rev:
+                        if public_url and public_url.startswith('http'):
+                            enviar_imagen(numero=tel, image_url=public_url, texto=alerta_rev, config=config)
+                        else:
+                            enviar_mensaje(tel, alerta_rev, config)
+            except Exception as e_rev:
+                app.logger.warning(f"⚠️ No se pudo notificar asesor de imagen no reconocida: {e_rev}")
+            return "Recibimos tu imagen, pero no pudimos procesarla automáticamente. Un asesor la revisará en breve y te confirmará tu pago. 🙏"
 
         es_valido = bool(datos_comp.get('valido'))
         monto_det = datos_comp.get('monto')
