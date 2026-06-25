@@ -151,7 +151,7 @@
                     {% if msg.es_imagen and msg.imagen_url %}
                     <div class="whatsapp-image-container">
                         <img src="{{ msg.imagen_url | public_img }}" alt="Imagen" class="whatsapp-image">
-                        {% if msg.mensaje and msg.mensaje != 'Analiza esta imagen' %}
+                        {% if msg.mensaje and msg.mensaje != 'Analiza esta imagen' and msg.mensaje != 'El usuario envió una imagen' %}
                         <div class="image-caption">
                             {{ msg.mensaje | whatsapp_format | safe }}
                         </div>
