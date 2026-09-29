@@ -2740,6 +2740,39 @@ def get_chat_messages(telefono):
         app.logger.error(f"🔴 Error en get_new_messages (antes get_chat_messages): {e}")
         return jsonify({'messages': []}), 500
 
+def _firma_chat(numero, config):
+    """
+    Firma liviana del estado de un chat. Cambia cuando:
+      - entra un mensaje del cliente o se inserta una fila (cambia MAX(id) / COUNT(*))
+      - la IA responde: actualizar_respuesta() hace UPDATE sobre la MISMA fila,
+        el id no cambia, pero COUNT(respuesta) sube en 1.
+    """
+    conn = get_db_connection(config)
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT COALESCE(MAX(id), 0), COUNT(*), COUNT(respuesta) "
+            "FROM conversaciones WHERE numero = %s",
+            (numero,)
+        )
+        row = cursor.fetchone()
+        cursor.close()
+    finally:
+        conn.close()
+    return f"{row[0]}:{row[1]}:{row[2]}"
+
+
+@app.route('/chat/<telefono>/estado')
+@login_required
+def get_chat_estado(telefono):
+    """Endpoint liviano para que el panel detecte cambios (incluye respuestas de la IA)."""
+    config = obtener_configuracion_por_host()
+    try:
+        return jsonify({'firma': _firma_chat(telefono, config)})
+    except Exception as e:
+        app.logger.error(f"🔴 Error en get_chat_estado: {e}")
+        return jsonify({'firma': None}), 500
+
 @app.route('/autorizar-porfirianna')
 def autorizar_porfirianna():
     """Endpoint específico para autorizar La Porfirianna con Google"""
@@ -11863,6 +11896,12 @@ def ver_chat(numero):
         au = session.get('auth_user') or {}
         is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
         
+        try:
+            firma_chat = _firma_chat(numero, config)
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo calcular firma_chat para {numero}: {e}")
+            firma_chat = ''
+
         return render_template('chats.html',
             chats=chats, 
             mensajes=msgs,
@@ -11870,7 +11909,8 @@ def ver_chat(numero):
             IA_ESTADOS=IA_ESTADOS,
             tenant_config=config,
             is_admin=is_admin,
-            lastMessageTimestamp=last_message_ts_ms
+            lastMessageTimestamp=last_message_ts_ms,
+            firma_chat=firma_chat
         )
         
     except Exception as e:
