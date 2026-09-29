@@ -7465,7 +7465,7 @@ def serve_public_docs(relpath):
         app.logger.error(f"🔴 Error serving public doc {relpath}: {e}")
         abort(500)
 
-def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo='texto', respuesta_media_url=None, productos_data=None):
+def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo='texto', respuesta_media_url=None, productos_data=None, solo_insertar=False):
     # --- PARCHE DE FORMATO PARA PANEL WEB ---
     import re  # Aseguramos que re esté disponible
     if respuesta and isinstance(respuesta, str):
@@ -7499,26 +7499,33 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo
         mensaje_limpio_para_buscar = sanitize_whatsapp_text(mensaje) if mensaje else mensaje
         
         # 1. Update (usando dominio_actual limpio)
-        cursor.execute("""
-            UPDATE conversaciones 
-            SET respuesta = %s,
-                respuesta_tipo_mensaje = %s,
-                respuesta_contenido_extra = %s,
-                dominio = %s,
-                timestamp = UTC_TIMESTAMP() 
-            WHERE numero = %s 
-              AND mensaje = %s 
-              AND respuesta IS NULL 
-            ORDER BY id DESC 
-            LIMIT 1
-        """, (respuesta, respuesta_tipo, respuesta_media_url, dominio_actual, numero, mensaje_limpio_para_buscar))
+        # solo_insertar=True: es la 2a, 3a... respuesta a un mismo mensaje del cliente (p. ej. varias
+        # fichas con imagen). Se guarda como fila propia SIN repetir el mensaje del cliente, para que
+        # el panel web no vuelva a pintar su burbuja antes de cada imagen.
+        filas_actualizadas = 0
+        if not solo_insertar:
+            cursor.execute("""
+                UPDATE conversaciones 
+                SET respuesta = %s,
+                    respuesta_tipo_mensaje = %s,
+                    respuesta_contenido_extra = %s,
+                    dominio = %s,
+                    timestamp = UTC_TIMESTAMP() 
+                WHERE numero = %s 
+                  AND mensaje = %s 
+                  AND respuesta IS NULL 
+                ORDER BY id DESC 
+                LIMIT 1
+            """, (respuesta, respuesta_tipo, respuesta_media_url, dominio_actual, numero, mensaje_limpio_para_buscar))
+            filas_actualizadas = cursor.rowcount
         
         # 2. Insert (usando dominio_actual limpio)
-        if cursor.rowcount == 0:
+        if solo_insertar or filas_actualizadas == 0:
+            mensaje_a_insertar = '' if solo_insertar else mensaje_limpio_para_buscar
             cursor.execute("""
                 INSERT INTO conversaciones (numero, mensaje, respuesta, respuesta_tipo_mensaje, respuesta_contenido_extra, dominio, timestamp) 
                 VALUES (%s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())
-            """, (numero, mensaje_limpio_para_buscar, respuesta, respuesta_tipo, respuesta_media_url, dominio_actual))
+            """, (numero, mensaje_a_insertar, respuesta, respuesta_tipo, respuesta_media_url, dominio_actual))
         
         conn.commit()
         cursor.close()
@@ -10050,6 +10057,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                     _productos_ref = _productos_ref[:3]
                     if _productos_ref:
                         app.logger.info(f"✅ [REFINANDO] {len(_productos_ref)} productos tras filtro")
+                        _primera_ficha = True
                         for _p in _productos_ref:
                             _img = _p.get('imagen')
                             _titulo = _p.get('servicio') or _p.get('modelo') or 'Producto'
@@ -10064,7 +10072,8 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                             _ficha = (f"🔹 *{_titulo.upper()}*\n\n{_precios_wa}\n📝 {_desc_wa}\n\n🆔 *SKU:* {_sku_p}")
                             if _img:
                                 enviar_imagen(numero=numero, image_url=_img, texto=_ficha, config=config)
-                                actualizar_respuesta(numero, texto, _ficha, config, respuesta_tipo='imagen', respuesta_media_url=_img)
+                                actualizar_respuesta(numero, texto, _ficha, config, respuesta_tipo='imagen', respuesta_media_url=_img, solo_insertar=not _primera_ficha)
+                                _primera_ficha = False
                                 time.sleep(0.8)
                             else:
                                 enviar_mensaje(numero, _ficha, config)
@@ -10432,6 +10441,7 @@ EJEMPLOS:
 
                 # Sin ambigüedad o con características específicas → mostrar directo
                 productos_para_ficha = precios_ficha[:3]
+                _primera_ficha = True
                 for p in productos_para_ficha:
                     img_url = p.get('imagen')
                     sku_p = p.get('sku', '') or 'S/N'
@@ -10451,7 +10461,8 @@ EJEMPLOS:
                     )
                     if img_url:
                         enviar_imagen(numero=numero, image_url=img_url, texto=ficha_wa, config=config)
-                        actualizar_respuesta(numero, texto, ficha_wa, config, respuesta_tipo='imagen', respuesta_media_url=img_url)
+                        actualizar_respuesta(numero, texto, ficha_wa, config, respuesta_tipo='imagen', respuesta_media_url=img_url, solo_insertar=not _primera_ficha)
+                        _primera_ficha = False
                         time.sleep(0.8)
                     else:
                         enviar_mensaje(numero, ficha_wa, config)
@@ -10920,6 +10931,7 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
         return False
 
     # Bloque Unificado de envío (Imagen + Texto)
+    _primera_ficha = True
     for p in productos_para_ficha:
         img_url = p.get('imagen')
         sku_p = p.get('sku', '') or 'S/N'
@@ -10952,7 +10964,8 @@ def fichas_ia_total(numero, texto, es_audio, config, incoming_saved, historial_f
             time.sleep(0.5)
             # 2) Enviamos la ficha completa como mensaje de texto para que nada se pierda
             enviar_mensaje(numero, ficha_wa, config)
-            actualizar_respuesta(numero, texto, ficha_wa, config, respuesta_tipo='imagen', respuesta_media_url=img_url)
+            actualizar_respuesta(numero, texto, ficha_wa, config, respuesta_tipo='imagen', respuesta_media_url=img_url, solo_insertar=not _primera_ficha)
+            _primera_ficha = False
             time.sleep(0.8)
         else:
             enviar_mensaje(numero, ficha_wa, config)
