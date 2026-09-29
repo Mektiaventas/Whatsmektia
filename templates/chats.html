@@ -2320,48 +2320,47 @@ function normalizeText(s) {
 
         console.debug('File upload functionality initialized - WhatsApp style');
     }
-/* ===================== VIGILANCIA DE IA ===================== */
-/* ===================== VIGILANCIA POR ID (CERO PARPADEO) ===================== */
-// Variable global para guardar el último ID que vimos
-let ultimoIdVisto = 0;
+/* ===================== VIGILANCIA POR FIRMA (detecta respuestas de la IA) ===================== */
+// La respuesta de la IA se guarda con UPDATE sobre la misma fila del mensaje del cliente,
+// por eso el id NO cambia. Se compara una "firma" (max id : filas : respuestas) que sí cambia.
+// La firma inicial viene renderizada por el servidor junto con la página (sin carreras).
+let firmaVista = {{ (firma_chat or '')|tojson }};
 
 function vigilarNuevosMensajes() {
-    if (!selectedChatId || isEditingAlias) return;
+    if (!selectedChatId || isEditingAlias || document.hidden) return;
 
     const textarea = document.getElementById('mensaje-texto');
     if (textarea && textarea.value.trim() !== "") return;
 
-    fetch(`/chat/${selectedChatId}/messages?after_ts=0`)
-        .then(response => response.json())
+    fetch(`/chat/${encodeURIComponent(selectedChatId)}/estado`, { cache: 'no-store' })
+        .then(response => {
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return response.json();
+        })
         .then(data => {
-            if (data.messages && data.messages.length > 0) {
-                // Obtenemos el ID del último mensaje que tiene el servidor
-                const ultimoMsgServidor = data.messages[data.messages.length - 1];
-                const idServidor = ultimoMsgServidor.id;
+            if (!data || !data.firma) return;
 
-                // Si es la primera vez que corre, guardamos el ID y no refrescamos
-                if (ultimoIdVisto === 0) {
-                    ultimoIdVisto = idServidor;
-                    console.log("Vigilancia iniciada. ID actual:", ultimoIdVisto);
-                    return;
-                }
+            // Respaldo: si el servidor no mandó firma inicial, la primera consulta sirve de base
+            if (!firmaVista) {
+                firmaVista = data.firma;
+                return;
+            }
 
-                // SI EL ID DEL SERVIDOR ES MAYOR AL QUE TENÍAMOS... ¡HAY MENSAJE NUEVO!
-                if (idServidor > ultimoIdVisto) {
-                    console.log("¡NUEVO MENSAJE DETECTADO! ID Antiguo:", ultimoIdVisto, "ID Nuevo:", idServidor);
-                    ultimoIdVisto = idServidor; // Actualizamos
-                    location.reload(); 
-                } else {
-                    console.debug("Sin mensajes nuevos. ID sigue siendo:", ultimoIdVisto);
-                }
+            if (data.firma !== firmaVista) {
+                console.log("Cambio detectado en el chat:", firmaVista, "->", data.firma);
+                firmaVista = data.firma;
+                location.reload();
             }
         })
         .catch(err => console.error("Error en vigilancia:", err));
 }
 
-// Intervalo de 15 segundos
+// Revisar cada 5 segundos, y de inmediato al volver a la pestaña
 if (typeof motorVigilancia === 'undefined') {
-    var motorVigilancia = setInterval(vigilarNuevosMensajes, 15000);
+    var motorVigilancia = setInterval(vigilarNuevosMensajes, 5000);
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) vigilarNuevosMensajes();
+    });
 }
 </script>
 {% endblock %}      
