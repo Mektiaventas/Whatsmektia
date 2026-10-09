@@ -22,6 +22,21 @@
 {% endif %}
 {% set negocio_nombre = subdomain|capitalize if subdomain else (tenant_config.negocio_nombre or 'Mektia') %}
 
+{# ===== Toggle IA ON / OFF (reutilizable) ===== #}
+{% macro ia_switch(numero, activa) %}
+<form action="/toggle_ai/{{ numero }}" method="POST" class="ia-switch-form">
+    <button type="submit"
+            class="ia-switch {{ 'is-on' if activa else 'is-off' }}"
+            role="switch"
+            aria-checked="{{ 'true' if activa else 'false' }}"
+            title="{{ 'Desactivar IA' if activa else 'Activar IA' }}">
+        <span class="ia-lbl">OFF</span>
+        <span class="ia-lbl">ON</span>
+        <span class="ia-thumb">{{ 'ON' if activa else 'OFF' }}</span>
+    </button>
+</form>
+{% endmacro %}
+
 <div class="chat-list-header">
     <h2>Conversaciones - {{ negocio_nombre }}</h2>
 </div>
@@ -130,11 +145,7 @@
                     👤 MODO MANUAL
                     {% endif %}
                 </span>
-                <form action="/toggle_ai/{{ selected }}" method="POST">
-                    <button type="submit" class="toggle-btn {{ 'on' if IA_ESTADOS.get(selected, {}).get('activa', True) else 'off' }}">
-                        IA {{ 'ON' if IA_ESTADOS.get(selected, {}).get('activa', True) else 'OFF' }}
-                    </button>
-                </form>
+                {{ ia_switch(selected, IA_ESTADOS.get(selected, {}).get('activa', True)) }}
             </div>
         </div>
         {% else %}
@@ -279,6 +290,15 @@
 
         {% if selected %}
         {% if not IA_ESTADOS.get(selected, {}).get('activa', True) %}
+        <!-- Modo manual: indicador + toggle para reactivar la IA -->
+        <div class="ia-active-message">
+            <div class="ia-indicator">
+                <span class="ia-icon">👤</span>
+                <span>Modo manual activado</span>
+            </div>
+            {{ ia_switch(selected, false) }}
+        </div>
+
         <form method="POST" action="/send-manual" class="reply-form" id="messageForm" enctype="multipart/form-data" style="display: flex; flex-direction: column; width: 100%;">
             <input type="hidden" name="numero" value="{{ selected }}">
 
@@ -535,18 +555,13 @@
             });
         </script>
         {% else %}
+        <!-- IA activa: indicador + toggle para desactivarla -->
         <div class="ia-active-message">
             <div class="ia-indicator">
-                <span class="ia-icon">{{ '🤖' if IA_ESTADOS.get(selected, {}).get('activa', True) else '👤' }}</span>
-                <span>{{ 'La IA está respondiendo automáticamente' if IA_ESTADOS.get(selected, {}).get('activa', True) else 'Modo manual activado' }}</span>
+                <span class="ia-icon">🤖</span>
+                <span>La IA está respondiendo automáticamente</span>
             </div>
-            <form action="/toggle_ai/{{ selected }}" method="POST">
-                {% if IA_ESTADOS.get(selected, {}).get('activa', True) %}
-                <button type="submit" class="toggle-btn off">Desactivar IA</button>
-                {% else %}
-                <button type="submit" class="toggle-btn on">Activar IA</button>
-                {% endif %}
-            </form>
+            {{ ia_switch(selected, true) }}
         </div>
         {% endif %}
         {% endif %}
@@ -1208,6 +1223,73 @@
     .image-message {
         display: none;
     } 
+
+    /* ===== Toggle IA ON / OFF ===== */
+    .ia-switch-form {
+        margin: 0;
+        display: inline-block;
+    }
+
+    .ia-switch {
+        position: relative;
+        display: inline-flex;
+        width: 112px;
+        height: 36px;
+        padding: 0;
+        border-radius: 999px;
+        border: 1px solid rgba(255,255,255,.2);
+        background: #2b3440;
+        cursor: pointer;
+        overflow: hidden;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: .5px;
+    }
+
+        .ia-switch .ia-lbl {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #6b7280;
+            z-index: 1;
+        }
+
+        .ia-switch .ia-thumb {
+            position: absolute;
+            top: 3px;
+            bottom: 3px;
+            width: calc(50% - 3px);
+            border-radius: 999px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            z-index: 2;
+            transition: left .2s ease, background .2s ease;
+            box-shadow: 0 2px 6px rgba(0,0,0,.35);
+        }
+
+        /* OFF = izquierda, rojo */
+        .ia-switch.is-off .ia-thumb {
+            left: 3px;
+            background: #ef4444;
+        }
+
+        /* ON = derecha, verde */
+        .ia-switch.is-on .ia-thumb {
+            left: 50%;
+            background: #22c55e;
+        }
+
+        .ia-switch:hover {
+            filter: brightness(1.1);
+        }
+
+        .ia-switch:focus-visible {
+            outline: 2px solid #60a5fa;
+            outline-offset: 2px;
+        }
 
 </style>
 <script>
@@ -2363,4 +2445,4 @@ if (typeof motorVigilancia === 'undefined') {
     });
 }
 </script>
-{% endblock %}      
+{% endblock %}
