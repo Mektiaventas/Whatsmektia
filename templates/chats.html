@@ -2444,5 +2444,42 @@ if (typeof motorVigilancia === 'undefined') {
         if (!document.hidden) vigilarNuevosMensajes();
     });
 }
+/* ===== VIGILANCIA DE LA LISTA (cuando NO hay chat abierto) ===== */
+let firmaLista = null;
+
+function vigilarListaChats() {
+    if (selectedChatId || document.hidden || isEditingAlias) return;
+
+    // No recargar si estás buscando un chat
+    const buscador = document.getElementById('search-chats-input');
+    if (buscador && buscador.value.trim() !== '') return;
+
+    fetch('/chats/data', { cache: 'no-store' })
+        .then(r => {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        })
+        .then(data => {
+            if (!data || !Array.isArray(data.chats)) return;
+
+            const firma = data.chats
+                .map(c => [c.numero, c.ultima_fecha, c.sin_leer, c.ultimo_mensaje].join('|'))
+                .join('#');
+
+            // La primera consulta solo guarda la base de comparación
+            if (firmaLista === null) { firmaLista = firma; return; }
+
+            if (firma !== firmaLista) {
+                firmaLista = firma;
+                location.reload();
+            }
+        })
+        .catch(err => console.error('Error vigilando lista:', err));
+}
+
+if (typeof motorLista === 'undefined') {
+    var motorLista = setInterval(vigilarListaChats, 5000);
+    vigilarListaChats();
+}
 </script>
 {% endblock %}
