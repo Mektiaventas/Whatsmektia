@@ -412,7 +412,9 @@ RUTAS_PUBLICAS = {
     'static', 'debug_headers', 'debug_dominio', 'diagnostico',
     'telegram_webhook_multitenant',
     'messenger_webhook_verification', 
-    'messenger_webhook'
+    'messenger_webhook',
+    # PWA (app instalable): deben ser públicos para que el cel pueda instalarla
+    'pwa_manifest', 'pwa_service_worker', 'pwa_icon'
 }
 @app.before_request
 def proteger_rutas():
@@ -1333,6 +1335,98 @@ def serve_logo(filename):
     except Exception as e:
         app.logger.error(f"❌ Error sirviendo logo: {e}")
         abort(404)
+
+# ==================== PWA (app instalable en el celular) ====================
+# Cada subdominio (tenant) se instala como su propia app, con su nombre y logo.
+PWA_THEME_COLOR = '#002663'   # --brand-blue
+PWA_ICON_SIZES = (180, 192, 512)
+_pwa_icon_cache = {}
+
+def _pwa_tenant_info():
+    """Nombre y archivo de logo del tenant actual (reusa inject_app_config)."""
+    try:
+        info = inject_app_config()
+    except Exception:
+        info = {}
+    nombre = (info.get('app_nombre') or 'SmartWhats').strip() or 'SmartWhats'
+    logo_path = None
+    logo = info.get('app_logo')
+    if logo:
+        try:
+            _, tenant_slug = get_productos_dir_for_config(obtener_configuracion_por_host())
+            candidato = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'logos',
+                                     tenant_slug, os.path.basename(logo))
+            if os.path.isfile(candidato):
+                logo_path = candidato
+        except Exception as e:
+            app.logger.warning(f"PWA: no se pudo ubicar el logo del tenant: {e}")
+    if not logo_path:
+        logo_path = os.path.join(app.static_folder, 'img', 'logo.png')
+    return nombre, logo_path
+
+@app.route('/manifest.webmanifest', endpoint='pwa_manifest')
+def pwa_manifest():
+    nombre, _ = _pwa_tenant_info()
+    manifest = {
+        "id": "/",
+        "name": nombre,
+        "short_name": nombre[:12],
+        "description": f"Panel de {nombre}",
+        "start_url": url_for('home'),
+        "scope": "/",
+        "display": "standalone",
+        "orientation": "portrait",
+        "background_color": PWA_THEME_COLOR,
+        "theme_color": PWA_THEME_COLOR,
+        "lang": "es-MX",
+        "icons": [
+            {"src": "/pwa/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+            {"src": "/pwa/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+            {"src": "/pwa/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+        ]
+    }
+    resp = Response(json.dumps(manifest, ensure_ascii=False), mimetype='application/manifest+json')
+    resp.headers['Cache-Control'] = 'no-cache'
+    return resp
+
+@app.route('/pwa/icon-<int:size>.png', endpoint='pwa_icon')
+def pwa_icon(size):
+    if size not in PWA_ICON_SIZES:
+        abort(404)
+    _, logo_path = _pwa_tenant_info()
+    try:
+        mtime = os.path.getmtime(logo_path)
+    except OSError:
+        abort(404)
+    key = (logo_path, mtime, size)
+    data = _pwa_icon_cache.get(key)
+    if data is None:
+        try:
+            lienzo = Image.new('RGBA', (size, size), PWA_THEME_COLOR)
+            with Image.open(logo_path) as img:
+                img = img.convert('RGBA')
+                img.thumbnail((int(size * 0.72), int(size * 0.72)), Image.LANCZOS)  # zona segura
+                lienzo.alpha_composite(img, ((size - img.width) // 2, (size - img.height) // 2))
+            buf = io.BytesIO()
+            lienzo.convert('RGB').save(buf, 'PNG', optimize=True)
+            data = buf.getvalue()
+            _pwa_icon_cache[key] = data
+        except Exception as e:
+            app.logger.error(f"PWA: error generando ícono {size}px: {e}")
+            abort(404)
+    resp = Response(data, mimetype='image/png')
+    resp.headers['Cache-Control'] = 'public, max-age=86400'
+    return resp
+
+@app.route('/service-worker.js', endpoint='pwa_service_worker')
+def pwa_service_worker():
+    # Se sirve desde la raíz para que controle todo el sitio
+    resp = send_from_directory(os.path.join(app.static_folder, 'pwa'), 'service-worker.js',
+                               mimetype='application/javascript')
+    resp.headers['Cache-Control'] = 'no-cache'
+    resp.headers['Service-Worker-Allowed'] = '/'
+    return resp
+# ==================== FIN PWA ====================
     
 @app.route('/uploads/productos/<path:filename>')
 def serve_product_image(filename):
