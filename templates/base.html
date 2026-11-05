@@ -2,10 +2,28 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- PWA: permite instalar el panel como app en el celular -->
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#002663">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="{{ app_nombre or 'SmartWhats' }}">
+  <link rel="apple-touch-icon" href="/pwa/icon-180.png">
   <title>{{ app_nombre or 'Tu Dominio' }} - {% block title %}{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
 </head>
 <body>
+    <!-- Barra superior (solo en celular) -->
+    <header class="mobile-topbar">
+        <button class="mobile-menu-btn" type="button" id="mobileMenuBtn" aria-label="Abrir menú" aria-expanded="false">
+            <span></span><span></span><span></span>
+        </button>
+        <div class="mobile-topbar-title">{{ app_nombre or 'SmartWhats' }}</div>
+    </header>
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
     <div class="layout">
 
         <!-- Sidebar principal FIJO -->
@@ -73,31 +91,37 @@
         </main>
 
     </div>
-    <!-- Al final del body de base.html -->
     <script>
-        // Función para manejar redimensionamiento responsive
-        function makeResponsive() {
-            // Ajustar sidebar en móviles
-            if (window.innerWidth < 768) {
-                document.querySelector('.sidebar').style.width = '60px';
-                document.querySelector('.sidebar-title').style.display = 'none';
-                document.querySelectorAll('.sidebar-nav li a').forEach(a => {
-                    a.style.padding = '8px';
-                    a.style.textAlign = 'center';
-                });
-            } else {
-                document.querySelector('.sidebar').style.width = '240px';
-                document.querySelector('.sidebar-title').style.display = 'block';
-                document.querySelectorAll('.sidebar-nav li a').forEach(a => {
-                    a.style.padding = '8px 12px';
-                    a.style.textAlign = 'left';
-                });
+        // Menú lateral tipo "cajón" en el celular
+        (function () {
+            const body = document.body;
+            const btn = document.getElementById('mobileMenuBtn');
+            const overlay = document.getElementById('sidebarOverlay');
+            function setMenu(abierto) {
+                body.classList.toggle('sidebar-open', abierto);
+                if (btn) btn.setAttribute('aria-expanded', abierto ? 'true' : 'false');
             }
-        }
+            if (btn) btn.addEventListener('click', () => setMenu(!body.classList.contains('sidebar-open')));
+            if (overlay) overlay.addEventListener('click', () => setMenu(false));
+            document.querySelectorAll('.sidebar a').forEach(a => a.addEventListener('click', () => setMenu(false)));
+            window.addEventListener('resize', () => { if (window.innerWidth > 768) setMenu(false); });
 
-        // Ejecutar al cargar y al redimensionar
-        window.addEventListener('load', makeResponsive);
-        window.addEventListener('resize', makeResponsive);
+            // Menú ⋮ del usuario
+            const userBox = document.getElementById('userBox');
+            const userBtn = document.getElementById('userMenuBtn');
+            if (userBox && userBtn) {
+                userBtn.addEventListener('click', (e) => { e.stopPropagation(); userBox.classList.toggle('open'); });
+                document.addEventListener('click', () => userBox.classList.remove('open'));
+            }
+        })();
+
+        // Registrar el service worker (necesario para "Instalar app")
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
+                    .catch(err => console.warn('No se pudo registrar el service worker:', err));
+            });
+        }
     </script>
     <style>
         /* === Mejora visual user-box / logout === */
@@ -282,7 +306,75 @@
             }
         }
 
+        /* === Celular: barra superior + menú tipo cajón === */
+        .mobile-topbar, .sidebar-overlay { display: none; }
+
         @media (max-width:768px) {
+            .mobile-topbar {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                position: fixed;
+                top: 0; left: 0; right: 0;
+                height: calc(54px + env(safe-area-inset-top));
+                padding: env(safe-area-inset-top) 12px 0;
+                background: var(--brand-blue, #002663);
+                color: #fff;
+                z-index: 1150;
+                box-shadow: 0 2px 10px rgba(0,0,0,.35);
+            }
+            .mobile-topbar-title {
+                font-weight: 600;
+                font-size: 1.05rem;
+                color: var(--brand-gold, #FFC20E);
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .mobile-menu-btn {
+                width: 42px; height: 42px;
+                display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 5px;
+                background: none; border: 0; border-radius: 10px; cursor: pointer; padding: 0;
+            }
+            .mobile-menu-btn span {
+                display: block; width: 22px; height: 2px; background: #fff; border-radius: 2px;
+                transition: transform .25s, opacity .2s;
+            }
+            body.sidebar-open .mobile-menu-btn span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+            body.sidebar-open .mobile-menu-btn span:nth-child(2) { opacity: 0; }
+            body.sidebar-open .mobile-menu-btn span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+            .layout .sidebar {
+                position: fixed;
+                top: calc(54px + env(safe-area-inset-top));
+                left: 0;
+                bottom: 0;
+                width: 270px;
+                max-width: 82vw;
+                height: auto;
+                overflow-y: auto;
+                z-index: 1100;
+                transform: translateX(-105%);
+                transition: transform .25s ease;
+                box-shadow: 4px 0 18px rgba(0,0,0,.45);
+            }
+            body.sidebar-open .layout .sidebar { transform: translateX(0); }
+            .layout .sidebar-logo img { max-width: 150px; }
+
+            .sidebar-overlay {
+                position: fixed;
+                inset: 0;
+                background: rgba(0,0,0,.45);
+                z-index: 1050;
+            }
+            body.sidebar-open .sidebar-overlay { display: block; }
+
+            .layout .main-content {
+                padding: calc(54px + env(safe-area-inset-top) + 12px) 12px calc(12px + env(safe-area-inset-bottom));
+                min-width: 0;
+                width: 100%;
+            }
+
             .user-box {
                 margin: 10px 8px 14px;
                 padding: 10px 12px;
