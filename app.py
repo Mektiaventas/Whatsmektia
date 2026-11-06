@@ -1426,6 +1426,15 @@ def pwa_service_worker():
     resp.headers['Cache-Control'] = 'no-cache'
     resp.headers['Service-Worker-Allowed'] = '/'
     return resp
+@app.template_global()
+def static_v(filename):
+    """URL de un archivo de /static con ?v=<fecha de modificación>.
+    Así el celular/navegador descarga el CSS nuevo en cuanto cambia (evita caché vieja)."""
+    try:
+        v = int(os.path.getmtime(os.path.join(app.static_folder, filename)))
+    except OSError:
+        v = 0
+    return url_for('static', filename=filename, v=v)
 # ==================== FIN PWA ====================
     
 @app.route('/uploads/productos/<path:filename>')
