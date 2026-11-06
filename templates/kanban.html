@@ -413,8 +413,8 @@
         }
 
         .card-avatar {
-            width: 90px !important;
-            height: 90px !important;
+            width: 28px !important;
+            height: 28px !important;
         }
 
         .card-flag {
@@ -456,6 +456,45 @@
         .alias-view.is-messenger {
             color: #0084ff;
         }
+    }
+
+    /* ===== Celular: una columna a la vez, se desliza de lado ===== */
+    @media (max-width: 768px) {
+        .kanban-board {
+            gap: 10px !important;
+            padding: 0 0 6px !important;
+            margin: 0 -6px;
+            scroll-snap-type: x mandatory;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior-x: contain;
+        }
+        .kanban-board .kanban-column {
+            flex: 0 0 86vw !important;
+            width: 86vw !important;
+            max-width: 360px;
+            margin-right: 0 !important;
+            padding: 8px !important;
+            scroll-snap-align: start;
+            height: calc(100dvh - 54px - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 30px) !important;
+            max-height: none !important;
+            overflow-y: auto;
+            overscroll-behavior-y: contain;
+        }
+        .kanban-board .column-header { padding: 6px 8px; margin-bottom: 8px; }
+        .kanban-board .column-header .col-icon { width: 32px !important; height: 32px !important; margin-right: 4px; }
+        .kanban-board .col-name { font-size: 0.95rem !important; line-height: 1.2; padding: 2px 4px; min-width: 0; }
+        .kanban-board .column-list { overflow: visible; min-height: 60px; }
+
+        .kanban-board .kanban-card { padding: 8px 10px !important; margin-bottom: 8px !important; border-width: 2px !important; }
+        .kanban-board .card-content { gap: 2px; }
+        .kanban-board .card-top-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+        .kanban-board .card-avatar-section { margin-right: 4px; }
+        .kanban-board .alias-view { max-width: calc(86vw - 110px) !important; font-size: 0.9rem; }
+        .kanban-board .card-msg { font-size: 0.78rem; max-width: 72%; }
+        .kanban-board .card-time { padding-bottom: 0; }
+        .kanban-board .badge-interes { font-size: 0.62rem; padding: 1px 7px; margin-bottom: 2px; }
+        /* Tarjeta "levantada" mientras se arrastra */
+        .sortable-chosen { box-shadow: 0 10px 28px rgba(0,0,0,.5) !important; transform: scale(1.02); }
     }
 </style>
 
@@ -1096,6 +1135,10 @@
             new Sortable(list, {
                 group: 'kanban',
                 animation: 150,
+                // En el cel: deslizar = scroll; mantener presionado ~0.3 s = arrastrar la tarjeta
+                delay: 300,
+                delayOnTouchOnly: true,
+                touchStartThreshold: 8,
                 ghostClass: 'sortable-ghost',
                 onEnd: evt => {
                     const numero = evt.item.dataset.chatNum;
