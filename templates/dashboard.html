@@ -56,13 +56,58 @@
         overflow: hidden;
     }
 
+    .pbi-title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 15px;
+    }
+    .pbi-title-row h3 {
+        color: white; margin: 0; font-size: 1.1rem; font-weight: 400;
+        display: flex; align-items: center; gap: 10px;
+    }
+    .pbi-actions { display: flex; gap: 8px; flex-shrink: 0; }
+    .pbi-btn {
+        background: rgba(255,255,255,0.08);
+        color: #fff;
+        border: 1px solid rgba(255,255,255,0.18);
+        border-radius: 8px;
+        padding: 7px 12px;
+        font-size: 0.85rem;
+        cursor: pointer;
+        text-decoration: none;
+        white-space: nowrap;
+    }
+    .pbi-btn:hover { background: rgba(255,255,255,0.16); }
+
+    /* En pantalla completa el reporte ocupa todo */
+    .iframe-container:fullscreen { padding-bottom: 0; height: 100%; border-radius: 0; }
+    .iframe-container:-webkit-full-screen { padding-bottom: 0; height: 100%; border-radius: 0; }
+
     @media (max-width: 768px) {
-        .header-row { flex-direction: column; align-items: stretch; text-align: center; }
-        .plan-box { justify-content: center; flex-wrap: wrap; }
+        .dash-wrap { padding: 0 !important; }
+        .header-row { flex-direction: column; align-items: stretch; text-align: center; margin-bottom: 12px; }
+        .header-row h1 { font-size: 1.2rem; }
+        .plan-box { justify-content: center; flex-wrap: wrap; gap: 6px 12px; font-size: 0.8rem; }
+        .pbi-section { padding: 10px; border-radius: 10px; }
+        .pbi-title-row h3 { font-size: 0.95rem; }
+        .pbi-btn { padding: 8px 10px; }
+        /* En vertical el reporte usa casi toda la pantalla en lugar de una franja 16:9.
+           Si el .pbix tiene "Diseño para teléfono", Power BI lo muestra aquí automáticamente. */
+        .iframe-container {
+            padding-bottom: 0;
+            height: calc(100dvh - 54px - env(safe-area-inset-top) - 150px);
+            min-height: 460px;
+        }
+    }
+    /* Celular acostado: aprovechar todo el alto */
+    @media (max-width: 950px) and (orientation: landscape) and (max-height: 500px) {
+        .iframe-container { padding-bottom: 0; height: calc(100dvh - 24px); min-height: 0; }
     }
 </style>
 
-<div style="max-width: 1200px; margin: 0 auto; padding: 1.5rem 1rem;">
+<div class="dash-wrap" style="max-width: 1200px; margin: 0 auto; padding: 1.5rem 1rem;">
     
     <div class="header-row">
         <h1>Dashboard General</h1>
@@ -79,10 +124,14 @@
 
     {% if pbi_url %}
     <div class="pbi-section">
-        <h3 style="color: white; margin-bottom: 15px; font-size: 1.1rem; font-weight: 400; display: flex; align-items: center; gap: 10px;">
-            <span style="color: #f2c811;">📊</span> Reporte Detallado de Negocio
-        </h3>
-        <div class="iframe-container">
+        <div class="pbi-title-row">
+            <h3><span style="color: #f2c811;">📊</span> Reporte de Negocio</h3>
+            <div class="pbi-actions">
+                <button type="button" class="pbi-btn" id="pbiFullscreenBtn" title="Ver en pantalla completa">⛶ Completa</button>
+                <a class="pbi-btn" href="{{ pbi_url }}" target="_blank" rel="noopener" title="Abrir el reporte solo">↗ Abrir</a>
+            </div>
+        </div>
+        <div class="iframe-container" id="pbiContainer">
             <iframe 
                 title="Dashboard Power BI" 
                 src="{{ pbi_url }}" 
@@ -99,5 +148,28 @@
 
 </div>
 
-{# No se requiere JavaScript adicional ya que eliminamos los contadores dinámicos #}
+<script>
+    // Pantalla completa del reporte; en Android además intenta girarlo a horizontal
+    (function () {
+        const btn = document.getElementById('pbiFullscreenBtn');
+        const cont = document.getElementById('pbiContainer');
+        if (!btn || !cont) return;
+        const puedeFull = cont.requestFullscreen || cont.webkitRequestFullscreen;
+        if (!puedeFull) { btn.style.display = 'none'; return; }  // iPhone: queda el botón "Abrir"
+        btn.addEventListener('click', async () => {
+            try {
+                if (cont.requestFullscreen) await cont.requestFullscreen();
+                else cont.webkitRequestFullscreen();
+                if (screen.orientation && screen.orientation.lock) {
+                    screen.orientation.lock('landscape').catch(() => {});
+                }
+            } catch (e) { console.warn('Pantalla completa no disponible:', e); }
+        });
+        document.addEventListener('fullscreenchange', () => {
+            if (!document.fullscreenElement && screen.orientation && screen.orientation.unlock) {
+                try { screen.orientation.unlock(); } catch (e) {}
+            }
+        });
+    })();
+</script>
 {% endblock %}
