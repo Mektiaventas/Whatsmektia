@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-title" content="{{ app_nombre or 'SmartWhats' }}">
   <link rel="apple-touch-icon" href="/pwa/icon-180.png">
   <title>{{ app_nombre or 'Tu Dominio' }} - {% block title %}{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+  <link rel="stylesheet" href="{{ static_v('css/styles.css') }}">
 </head>
 <body>
     <!-- Barra superior (solo en celular) -->
