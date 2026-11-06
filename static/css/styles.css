@@ -1361,3 +1361,62 @@ body {
     color: white;
     margin-bottom: 20px;
 }
+
+
+/* ==================== CONFIGURACIÓN EN CELULAR ==================== */
+@media (max-width: 768px) {
+    .config-header h2 { font-size: 1.4rem; margin: 4px 0 10px; }
+
+    /* Pestañas: una sola fila que se desliza de lado */
+    ul.tabs {
+        display: flex !important;
+        flex-wrap: nowrap !important;
+        overflow-x: auto;
+        gap: 6px;
+        padding: 0 0 6px;
+        margin: 0 0 12px;
+        scrollbar-width: none;
+    }
+    ul.tabs::-webkit-scrollbar { display: none; }
+    ul.tabs li { flex: 0 0 auto; margin: 0 !important; }
+    ul.tabs li a { padding: 8px 14px !important; font-size: 0.9rem; white-space: nowrap; }
+
+    /* Tarjetas a lo ancho, una debajo de otra (ignora los width: 30% / 20% fijos) */
+    .config-form, .form-row { width: 100% !important; }
+    .form-row { flex-direction: column !important; gap: 10px !important; }
+    .form-row > form { width: 100% !important; }
+    .form-card {
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box;
+        margin: 0 0 10px !important;
+        padding: 12px !important;
+    }
+    .form-card label { font-size: 1rem; }
+    .form-card input,
+    .form-card select,
+    .form-card textarea {
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box;
+        font-size: 16px !important;   /* evita el zoom automático */
+    }
+    .form-card textarea { font-family: inherit !important; line-height: 1.4; }
+    .form-card input[type="file"] { font-size: 14px !important; }
+    .form-card small, .form-text { font-size: 0.8rem; }
+    .longitud_desc { min-width: 0 !important; width: 100% !important; flex: 1 1 100% !important; }
+
+    .config-form .btn-primary,
+    .config-form > button[type="submit"] { width: 100% !important; padding: 14px !important; }
+    .form-card .btn-success { width: 100%; padding: 10px; }
+
+    /* Integración con Google Calendar */
+    .form-group .btn.btn-primary { display: block; text-align: center; margin-bottom: 6px; }
+
+    /* Tablas (catálogos, precios): se deslizan de lado dentro de su tarjeta */
+    .table-responsive { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .table-responsive .table { min-width: 560px; }
+    .table td a { word-break: break-all; }
+
+    .asesores-grid { grid-template-columns: 1fr !important; }
+}
