@@ -40,7 +40,7 @@
 <div class="chat-list-header">
     <h2>Conversaciones - {{ negocio_nombre }}</h2>
 </div>
-<div class="chat-layout-v2">
+<div class="chat-layout-v2 {{ 'has-selected' if selected else 'no-selected' }}">
     <!-- Lado izquierdo: Lista -->
     <aside class="chat-list-v2">
         <div class="chat-list-tools">
@@ -109,6 +109,7 @@
         <div class="chat-panel-header" data-num="{{ selected }}">
             <div class="chat-header-info">
                 <div class="chat-title">
+                    <a href="/chats" class="chat-back-btn" aria-label="Volver a la lista">&#8592;</a>
                     {% set selected_chat = (chats | selectattr("numero", "equalto", selected) | first) %}
                     {% set avatar_src_header = '/static/icons/whatsapp-icon.png' %}
                     {% if selected and (selected.startswith('tg_') or (selected_chat and selected_chat.canal == 'Telegram')) %}
@@ -604,6 +605,7 @@
 </div>
 
 <button class="mobile-chat-toggle" onclick="toggleChatList()">💬</button>
+
 <style>
     :root {
         --left-width: 340px;
@@ -2482,4 +2484,117 @@ if (typeof motorLista === 'undefined') {
     vigilarListaChats();
 }
 </script>
+<style>
+    /* ===== Celular: una sola columna (lista → conversación → ←) ===== */
+    .chat-back-btn { display: none; }
+
+    @media (max-width: 768px) {
+        .mobile-chat-toggle { display: none !important; }
+        .chat-layout-v2 .sidebar-right { display: none !important; }
+
+        .chat-list-header h2 { font-size: 1.1rem; margin: 0 0 8px; }
+
+        .chat-layout-v2 {
+            flex-direction: column;
+            gap: 0;
+            padding: 0;
+            margin: 0 -6px;
+        }
+
+        /* --- Sin chat abierto: solo la lista, a todo lo ancho --- */
+        .chat-layout-v2.no-selected {
+            height: auto;
+            overflow: visible;
+        }
+        .chat-layout-v2.no-selected .chat-panel-v2 { display: none !important; }
+        .chat-layout-v2.no-selected .chat-list-v2 {
+            width: 100% !important;
+            max-width: none;
+            min-width: 0;
+            overflow: visible;
+            padding: 6px;
+        }
+        .chat-layout-v2.no-selected .chat-list-v2 .alias-view { max-width: calc(100vw - 120px) !important; }
+        .chat-list-tools .search-input {
+            flex: 0 0 auto !important; width: 100%; min-width: 0; font-size: 16px;
+            height: auto !important; min-height: 0 !important; padding: 10px 12px !important;
+        }
+
+        /* --- Con chat abierto: solo la conversación --- */
+        body:has(.chat-layout-v2.has-selected) .chat-list-header { display: none; }
+        .chat-layout-v2.has-selected {
+            overflow: hidden !important;
+            height: calc(100dvh - 54px - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 24px);
+        }
+        .chat-layout-v2.has-selected .chat-list-v2 { display: none !important; }
+        .chat-layout-v2.has-selected .chat-panel-v2 {
+            width: 100% !important;
+            flex: 1 1 0 !important;
+            min-height: 0 !important;
+            max-height: 100% !important;
+            padding: 0 !important;
+            border-radius: 12px !important;
+        }
+        .chat-layout-v2.has-selected .chat-panel-header { position: static !important; }
+
+        .chat-back-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 36px; height: 36px;
+            margin-right: 4px;
+            border-radius: 50%;
+            color: #fff;
+            font-size: 22px;
+            text-decoration: none;
+            flex-shrink: 0;
+        }
+        .chat-back-btn:active { background: rgba(255,255,255,.12); }
+
+        .chat-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 6px 4px !important;
+            flex-wrap: nowrap;
+        }
+        .chat-header-info { min-width: 0; flex: 1 1 auto; }
+        .chat-title { display: flex; align-items: center; min-width: 0; }
+        .chat-title .alias-view { max-width: calc(100vw - 210px) !important; }
+        .chat-number { font-size: 11px; opacity: .7; margin-left: 40px; }
+        .chat-controls { flex-shrink: 0; }
+        .chat-controls .badge { display: none; }   /* el switch ON/OFF ya lo indica */
+
+        .msgs-wrap-v2 { padding: 6px 4px; }
+        .msg-box { max-width: 85% !important; }
+        .image-message img, .msg-box img, .msg-box video { max-width: 100% !important; height: auto; }
+
+        /* Aviso de IA abajo y compacto (el switch ya está en el encabezado) */
+        .chat-panel-v2 .ia-active-message {
+            order: 3 !important;
+            flex-shrink: 0;
+            margin: 6px !important;
+            padding: 6px 10px !important;
+            font-size: 12px;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .chat-panel-v2 .ia-active-message .ia-switch-form { display: none; }
+        .chat-panel-v2 .reply-form { order: 4 !important; border-radius: 0 0 12px 12px !important; }
+        .reply-form { padding-bottom: env(safe-area-inset-bottom); }
+        .reply-form .input-group { gap: 4px; }
+        .reply-textarea { font-size: 16px !important; }   /* evita el zoom automático del iPhone */
+        .reply-form .input-group { align-items: center; }
+        .reply-form .reply-textarea { min-width: 0; flex: 1 1 auto; }
+        .reply-form .file-attach-btn, .reply-form .emoji-pick-btn { font-size: 22px !important; padding: 4px !important; flex-shrink: 0; }
+        /* Botón Enviar como flecha redonda */
+        .reply-form .send-btn {
+            flex: 0 0 44px !important; width: 44px !important; height: 44px !important;
+            padding: 0 !important; border-radius: 50% !important;
+            font-size: 0 !important; display: inline-flex !important; align-items: center; justify-content: center;
+        }
+        .reply-form .send-btn::after { content: "➤"; font-size: 18px; }
+        .emoji-picker-list { max-width: calc(100vw - 24px) !important; left: 8px !important; }
+    }
+</style>
 {% endblock %}
