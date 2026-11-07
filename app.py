@@ -1435,6 +1435,94 @@ def static_v(filename):
     except OSError:
         v = 0
     return url_for('static', filename=filename, v=v)
+# ---------- Notificaciones push ----------
+from push_notifs import (vapid_public_key, push_configurado, guardar_suscripcion,
+                         borrar_suscripcion, enviar_push_tenant, marcar_pendiente,
+                         limpiar_pendiente, listar_pendientes, iniciar_recordatorios)
+
+@app.route('/push/vapid-public-key')
+@login_required
+def push_vapid_public_key():
+    return jsonify({'key': vapid_public_key(), 'configurado': push_configurado()})
+
+@app.route('/push/subscribe', methods=['POST'])
+@login_required
+def push_subscribe():
+    try:
+        au = session.get('auth_user') or {}
+        guardar_suscripcion(obtener_configuracion_por_host(), request.get_json(silent=True) or {},
+                            usuario=au.get('user'), user_agent=request.headers.get('User-Agent'))
+        return jsonify({'ok': True})
+    except ValueError as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    except Exception as e:
+        app.logger.error(f"🔴 PUSH subscribe: {e}")
+        return jsonify({'ok': False, 'error': 'No se pudo guardar'}), 500
+
+@app.route('/push/unsubscribe', methods=['POST'])
+@login_required
+def push_unsubscribe():
+    try:
+        borrar_suscripcion(obtener_configuracion_por_host(), (request.get_json(silent=True) or {}).get('endpoint'))
+    except Exception as e:
+        app.logger.error(f"🔴 PUSH unsubscribe: {e}")
+    return jsonify({'ok': True})
+
+@app.route('/push/test', methods=['POST'])
+@login_required
+def push_test():
+    cfg = obtener_configuracion_por_host()
+    n = enviar_push_tenant(cfg, '🔔 Avisos activados',
+                           f"Así te llegarán los avisos de {cfg.get('ia_nombre') or 'tu Vendedor Virtual'}.",
+                           url='/chats', tag='prueba', esperar=True)
+    return jsonify({'ok': bool(n), 'enviados': n or 0})
+
+def _push_nombre_cliente(numero, config):
+    try:
+        return obtener_nombre_mostrado_por_numero(numero, config) or numero
+    except Exception:
+        return numero
+
+def push_aviso_chat(config, numero, titulo, cuerpo, tipo='chat'):
+    """Aviso que al tocarlo abre ese chat.
+    tipo='chat'   → un solo aviso por chat (el nuevo reemplaza al anterior)
+    tipo='alerta' → avisos de asesor; no los reemplazan los mensajes normales"""
+    try:
+        enviar_push_tenant(config, titulo, cuerpo, url=f"/chats/{numero}", tag=f"{tipo}-{numero}")
+    except Exception as e:
+        app.logger.warning(f"⚠️ PUSH no enviado: {e}")
+
+def push_alerta_asesor(config, numero, cliente, asesor_nombre, titulo, cuerpo, motivo=''):
+    """Marca el chat como 'Pendiente de asesor' y avisa al cel."""
+    try:
+        marcar_pendiente(config, numero, cliente=cliente, asesor=asesor_nombre, motivo=motivo)
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudo marcar pendiente {numero}: {e}")
+    push_aviso_chat(config, numero, titulo, cuerpo, tipo='alerta')
+
+@app.route('/push/pendientes')
+@login_required
+def push_pendientes():
+    try:
+        filas = listar_pendientes(obtener_configuracion_por_host())
+        return jsonify({'ok': True, 'pendientes': [
+            {'numero': f['numero'], 'asesor': f.get('asesor') or '', 'minutos': int(f.get('minutos') or 0)}
+            for f in filas]})
+    except Exception as e:
+        app.logger.error(f"🔴 PUSH pendientes: {e}")
+        return jsonify({'ok': False, 'pendientes': []})
+
+@app.route('/chats/<numero>/atendido', methods=['POST'])
+@login_required
+def chat_marcar_atendido(numero):
+    try:
+        limpiar_pendiente(obtener_configuracion_por_host(), numero)
+        return jsonify({'ok': True})
+    except Exception as e:
+        app.logger.error(f"🔴 marcar atendido {numero}: {e}")
+        return jsonify({'ok': False}), 500
+
+iniciar_recordatorios()
 # ==================== FIN PWA ====================
     
 @app.route('/uploads/productos/<path:filename>')
@@ -7375,6 +7463,12 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True, hi
             except Exception as e:
                 app.logger.warning(f"⚠️ Error notificando asesor: {e}")
         
+        # 🔔 Aviso al cel + marca "Pendiente de asesor"
+        _cli = _push_nombre_cliente(numero_cliente, config)
+        push_alerta_asesor(config, numero_cliente, _cli, nombre,
+                           f"🔔 {_cli} pasó con {nombre}",
+                           "La IA lo canalizó a un asesor. Tócalo para ver el chat.", motivo='Pasar con asesor')
+
         # Mover chats en el Kanban
         actualizar_columna_chat(numero_cliente, columna_destino_id, config)
         return enviado
@@ -7849,6 +7943,7 @@ def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
     )
     
     # 🚀 ENVÍO DINÁMICO AL ASESOR EN TURNO
+    asesor = None
     try:
         # 1. Buscamos a quién le toca atender
         asesor = obtener_siguiente_asesor(numero_cliente=numero_cliente, config=config)
@@ -7868,6 +7963,13 @@ def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
 
     except Exception as e:
         app.logger.error(f"🔴 Error crítico enviando la alerta: {e}")
+
+    # 🔔 Aviso al cel (app): llega aunque el asesor no haya escrito en 24 h
+    _asesor_nom = (asesor.get('nombre') or asesor.get('telefono')) if asesor else ''
+    _asesor_txt = f"Asesor en turno: {_asesor_nom}. " if _asesor_nom else ""
+    push_alerta_asesor(config, numero_cliente, cliente_mostrado, _asesor_nom,
+                       f"🚨 {cliente_mostrado} necesita un asesor",
+                       f"{_asesor_txt}{(mensaje_clave or '')[:100]}", motivo=(mensaje_clave or '')[:200])
 
 def resumen_rafa(numero, config=None):
     """Resumen más completo y eficiente (muestra nombre si existe)"""
@@ -9820,6 +9922,10 @@ def notificar_asesor_asignado(asesor, numero_cliente, config=None):
         
         enviar_mensaje(telefono_asesor, mensaje_notificacion, config)
         app.logger.info(f"✅ Notificación enviada al asesor {asesor.get('nombre')}")
+        _cli = _push_nombre_cliente(numero_cliente, config)
+        push_alerta_asesor(config, numero_cliente, _cli, asesor.get('nombre') or telefono_asesor,
+                           f"🔔 Cliente asignado a {asesor.get('nombre') or telefono_asesor}",
+                           f"{_cli} · contáctalo pronto", motivo='Asignación de asesor')
         
     except Exception as e:
         app.logger.error(f"🔴 Error notificando al asesor: {e}") 
@@ -9842,6 +9948,10 @@ def notificar_asesor_asignado(asesor, numero_cliente, config=None):
         
         enviar_mensaje(telefono_asesor, mensaje_notificacion, config)
         app.logger.info(f"✅ Notificación enviada al asesor {asesor.get('nombre')}")
+        _cli = _push_nombre_cliente(numero_cliente, config)
+        push_alerta_asesor(config, numero_cliente, _cli, asesor.get('nombre') or telefono_asesor,
+                           f"🔔 Cliente asignado a {asesor.get('nombre') or telefono_asesor}",
+                           f"{_cli} · contáctalo pronto", motivo='Asignación de asesor')
         
     except Exception as e:
         app.logger.error(f"🔴 Error notificando al asesor: {e}") 
@@ -9996,6 +10106,17 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
     ia_activa = IA_ESTADOS.get(numero, {}).get('activa', True)
     if not ia_activa:
         app.logger.info(f"ℹ️ IA desactivada para {numero}, omitiendo procesamiento.")
+        # 🔔 Aviso al cel: nadie le contesta si no es una persona
+        if not es_mi_numero:
+            if es_audio:
+                _cuerpo = f"🎤 {transcripcion}" if transcripcion else "🎤 Mandó un audio"
+            elif es_imagen:
+                _cuerpo = "📷 Mandó una imagen"
+            elif es_archivo:
+                _cuerpo = "📎 Mandó un archivo"
+            else:
+                _cuerpo = texto or "Nuevo mensaje"
+            push_aviso_chat(config, numero, f"👤 {_push_nombre_cliente(numero, config)} (modo manual)", _cuerpo)
         return True # Retornamos True para que el webhook no reintente
 
     # 1.5. --- CARGA ÚNICA DE HISTORIAL (YA INYECTADO) ---
@@ -12301,6 +12422,12 @@ def enviar_manual():
             conn.commit()
             cursor.close()
             conn.close()
+
+            # ✅ Alguien contestó a mano: ya no está pendiente de asesor
+            try:
+                limpiar_pendiente(config, numero)
+            except Exception as e:
+                app.logger.warning(f"⚠️ No se pudo limpiar pendiente {numero}: {e}")
             
             # 4. ACTUALIZAR KANBAN (mover a "Esperando Respuesta")
             try:
