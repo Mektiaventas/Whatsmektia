@@ -129,66 +129,122 @@
             const testBtn = document.getElementById('pushTestBtn');
             const msg = document.getElementById('pushMsg');
             if (!item || !btn) return;
-            const soportado = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
-            const esIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
-            const instalada = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
-            item.hidden = false;
 
-            function estado(texto, activo) {
-                btn.textContent = activo ? '🔔 Avisos activos' : '🔔 Activar avisos';
-                btn.classList.toggle('on', !!activo);
-                testBtn.hidden = !activo;
-                msg.textContent = texto || '';
+            const ua = navigator.userAgent;
+            const esIOS = /iphone|ipad|ipod/i.test(ua);
+            const esAndroid = /android/i.test(ua);
+            const instalada = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+            const soportado = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+
+            const PASOS_DESBLOQUEO = esAndroid
+                ? (instalada
+                    ? 'Para desbloquearlos: mantén presionado el ícono de la app → ⓘ Información de la app → Notificaciones → Permitir. Luego cierra y abre la app.'
+                    : 'Para desbloquearlos: toca el candado 🔒 junto a la dirección → Permisos → Notificaciones → Permitir. Luego recarga la página.')
+                : esIOS
+                    ? 'Para desbloquearlos: Ajustes del iPhone → Notificaciones → busca la app → Permitir notificaciones.'
+                    : 'Para desbloquearlos: toca el candado 🔒 junto a la dirección → Notificaciones → Permitir, y recarga la página.';
+
+            // Un solo lugar decide qué se muestra
+            function mostrar(estado, extra) {
+                item.hidden = false;
+                btn.disabled = false;
+                btn.classList.remove('on', 'off');
+                testBtn.hidden = true;
+                msg.textContent = '';
+                switch (estado) {
+                    case 'activo':
+                        btn.textContent = '🔔 Avisos activos ✓';
+                        btn.classList.add('on');
+                        testBtn.hidden = false;
+                        msg.textContent = extra || 'Te llegan aunque la app esté cerrada. Toca el botón para apagarlos.';
+                        break;
+                    case 'bloqueado':
+                        btn.textContent = '🔕 Avisos bloqueados';
+                        btn.classList.add('off');
+                        msg.textContent = PASOS_DESBLOQUEO;
+                        break;
+                    case 'instalar':
+                        btn.textContent = '🔕 Avisos no disponibles';
+                        btn.disabled = true;
+                        msg.textContent = 'En iPhone primero instala la app: Compartir ⬆️ → "Agregar a inicio", y ábrela desde ese ícono.';
+                        break;
+                    case 'nosoporta':
+                        btn.textContent = '🔕 Avisos no disponibles';
+                        btn.disabled = true;
+                        msg.textContent = 'Este navegador no admite avisos. Usa Chrome (Android) o la app instalada (iPhone).';
+                        break;
+                    case 'trabajando':
+                        btn.textContent = '⏳ Un momento…';
+                        btn.disabled = true;
+                        break;
+                    default: // 'apagado'
+                        btn.textContent = '🔔 Activar avisos';
+                        msg.textContent = extra || '';
+                }
             }
+
             function b64aBytes(b64) {
                 const pad = '='.repeat((4 - b64.length % 4) % 4);
                 const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
                 return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
             }
-            async function enviarAlServidor(sub) {
-                const r = await fetch('/push/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sub) });
-                if (!r.ok) throw new Error('servidor');
+            async function guardarEnServidor(sub) {
+                const r = await fetch('/push/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sub.toJSON()) });
+                if (!r.ok) throw new Error('servidor ' + r.status);
+            }
+            async function suscribir(reg) {
+                const info = await (await fetch('/push/vapid-public-key', { cache: 'no-store' })).json();
+                if (!info.key) throw new Error('sin-llave');
+                let sub = await reg.pushManager.getSubscription();
+                if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64aBytes(info.key) });
+                await guardarEnServidor(sub);
+                return sub;
             }
 
-            if (!soportado) {
-                if (esIOS && !instalada) estado('En iPhone primero instala la app: Compartir → "Agregar a inicio".');
-                else estado('Este navegador no admite avisos.');
-                btn.disabled = true;
-                return;
-            }
+            if (!soportado) { mostrar(esIOS && !instalada ? 'instalar' : 'nosoporta'); return; }
 
-            // Si ya estaban activos, renovar en silencio
-            navigator.serviceWorker.ready.then(async (reg) => {
-                const sub = await reg.pushManager.getSubscription();
-                if (sub && Notification.permission === 'granted') {
-                    estado('', true);
-                    enviarAlServidor(sub.toJSON()).catch(() => {});
-                } else if (Notification.permission === 'denied') {
-                    estado('Bloqueaste los avisos. Actívalos en los permisos del sitio.');
-                }
-            });
-
-            btn.addEventListener('click', async () => {
+            // Estado al abrir cualquier página: se lee del celular, no se "reinicia"
+            (async () => {
+                if (Notification.permission === 'denied') { mostrar('bloqueado'); return; }
+                if (Notification.permission !== 'granted') { mostrar('apagado'); return; }
                 try {
                     const reg = await navigator.serviceWorker.ready;
-                    const actual = await reg.pushManager.getSubscription();
-                    if (actual && Notification.permission === 'granted') {   // ya activos → desactivar
+                    const sub = await reg.pushManager.getSubscription();
+                    if (sub) { mostrar('activo'); guardarEnServidor(sub).catch(() => {}); }
+                    else if (localStorage.getItem('vv_avisos_off') === '1') mostrar('apagado');
+                    else { await suscribir(reg); mostrar('activo'); }   // permiso dado: re-suscribir solo
+                } catch (e) { mostrar('apagado'); }
+            })();
+
+            btn.addEventListener('click', async () => {
+                if (Notification.permission === 'denied') { mostrar('bloqueado'); return; }
+                const reg = await navigator.serviceWorker.ready;
+                const actual = await reg.pushManager.getSubscription();
+
+                if (actual && Notification.permission === 'granted') {   // apagar en este celular
+                    mostrar('trabajando');
+                    try {
                         await fetch('/push/unsubscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: actual.endpoint }) });
                         await actual.unsubscribe();
-                        estado('Avisos desactivados en este celular.', false);
-                        return;
-                    }
-                    const permiso = await Notification.requestPermission();
-                    if (permiso !== 'granted') { estado('No diste permiso para avisos.'); return; }
-                    const r = await fetch('/push/vapid-public-key');
-                    const info = await r.json();
-                    if (!info.key) { estado('Los avisos aún no están configurados en el servidor.'); return; }
-                    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64aBytes(info.key) });
-                    await enviarAlServidor(sub.toJSON());
-                    estado('Listo. Te llegarán los avisos aunque la app esté cerrada.', true);
+                    } catch (e) {}
+                    try { localStorage.setItem('vv_avisos_off', '1'); } catch (e) {}
+                    mostrar('apagado', 'Avisos apagados en este celular.');
+                    return;
+                }
+
+                mostrar('trabajando');
+                const permiso = await Notification.requestPermission();
+                if (permiso === 'denied') { mostrar('bloqueado'); return; }
+                if (permiso !== 'granted') { mostrar('apagado', 'Cerraste la ventana sin elegir. Vuelve a tocar el botón y elige "Permitir".'); return; }
+                try {
+                    await suscribir(reg);
+                    try { localStorage.removeItem('vv_avisos_off'); } catch (e) {}
+                    mostrar('activo', '¡Listo! Toca "Enviar aviso de prueba" para comprobarlo.');
                 } catch (e) {
                     console.warn('Avisos:', e);
-                    estado('No se pudieron activar los avisos. Intenta de nuevo.');
+                    mostrar('apagado', e.message === 'sin-llave'
+                        ? 'Los avisos aún no están configurados en el servidor.'
+                        : 'No se pudieron activar. Revisa tu conexión e intenta de nuevo.');
                 }
             });
 
@@ -196,8 +252,8 @@
                 testBtn.disabled = true;
                 try {
                     const r = await (await fetch('/push/test', { method: 'POST' })).json();
-                    msg.textContent = r.enviados ? `Aviso enviado a ${r.enviados} dispositivo(s).` : 'No se envió. Revisa la configuración del servidor.';
-                } catch (e) { msg.textContent = 'No se pudo enviar la prueba.'; }
+                    msg.textContent = r.enviados ? `✅ Aviso enviado a ${r.enviados} dispositivo(s). Debe llegarte en unos segundos.` : '⚠️ No se envió. Revisa el log del servidor (líneas PUSH).';
+                } catch (e) { msg.textContent = '⚠️ No se pudo enviar la prueba.'; }
                 testBtn.disabled = false;
             });
         })();
@@ -464,6 +520,7 @@
             background: transparent; color: #fff; padding: 8px 12px;
         }
         .push-btn.on { background: rgba(37,211,102,.18); border-color: rgba(37,211,102,.6); }
+        .push-btn.off { background: rgba(229,57,53,.15); border-color: rgba(229,57,53,.55); }
         .push-btn:disabled { opacity: .55; cursor: default; }
         .push-test { font-size: .8rem; padding: 6px 12px; opacity: .85; }
         .push-msg { font-size: .75rem; opacity: .8; line-height: 1.3; }
