@@ -7072,11 +7072,12 @@ def guardar_respuesta_imagen(numero, imagen_url, config=None, nota='[Imagen envi
         app.logger.error(f"❌ Error guardando respuesta-imagen para {numero}: {e}")
         return False
 
-def obtener_siguiente_asesor(numero_cliente=None, config=None, texto_usuario=""):
+def obtener_siguiente_asesor(numero_cliente=None, config=None, texto_usuario="", forzar=False):
     """
     Obtiene el asesor asignado persistentemente al cliente. 
     Si el cliente no tiene asignación, asigna el siguiente por rotación, 
     A MENOS que el mensaje sea solo un saludo.
+    forzar=True: la IA ya decidió pasar con un asesor → siempre devolver el asignado.
     """
     if config is None:
         config = obtener_configuracion_por_host()
@@ -7112,7 +7113,7 @@ def obtener_siguiente_asesor(numero_cliente=None, config=None, texto_usuario="")
                 palabras_fuerza = ["asesor", "humano", "persona", "hablar con alguien", "ayuda", "llamar"]
                 quiere_humano = any(w in str(texto_usuario).lower() for w in palabras_fuerza)
                 
-                if not quiere_humano:
+                if not quiere_humano and not forzar:
                     app.logger.info(f"🤖 Cliente {numero_cliente} tiene asesor, pero seguimos con IA (no pidió humano).")
                     cursor.close(); conn.close()
                     return None  # <--- Esto permite que el flujo siga hacia DeepSeek
@@ -7373,9 +7374,15 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True, hi
         _ensure_asesor_id_column(config)
         
         # 2. OBTENER ASESOR (Aquí es donde se dispara la rotación)
-        asesor = obtener_siguiente_asesor(numero_cliente, config)
+        asesor = obtener_siguiente_asesor(numero_cliente, config, forzar=True)
         if not asesor:
             app.logger.info("ℹ️ No hay asesores configurados para pasar contacto")
+            # Aun sin asesores, alguien tiene que atenderlo: marcar y avisar al cel
+            _cli = _push_nombre_cliente(numero_cliente, config)
+            push_alerta_asesor(config, numero_cliente, _cli, '',
+                               f"🚨 {_cli} pidió un asesor",
+                               "No hay asesores configurados: atiéndelo desde el panel.",
+                               motivo='Sin asesor configurado')
             return False
 
         nombre = asesor.get('nombre') or 'Asesor'
@@ -7946,7 +7953,7 @@ def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
     asesor = None
     try:
         # 1. Buscamos a quién le toca atender
-        asesor = obtener_siguiente_asesor(numero_cliente=numero_cliente, config=config)
+        asesor = obtener_siguiente_asesor(numero_cliente=numero_cliente, config=config, forzar=True)
         
         if asesor and asesor.get('telefono'):
             telefono_asesor = asesor['telefono']
