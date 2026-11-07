@@ -48,6 +48,13 @@
 
                 <li><a href="{{ url_for('ver_chats') }}">Chats</a></li>
                 <li><a href="{{ url_for('configuracion_tab', tab='negocio') }}">Configuración</a></li>
+                {% if session.auth_user %}
+                <li class="push-item" id="pushItem" hidden>
+                    <button type="button" class="push-btn" id="pushBtn">🔔 Activar avisos</button>
+                    <button type="button" class="push-test" id="pushTestBtn" hidden>Enviar aviso de prueba</button>
+                    <small class="push-msg" id="pushMsg"></small>
+                </li>
+                {% endif %}
                 <!-- Dentro de <nav> o en el footer -->
                 <li><a href="{{ url_for('privacy_policy') }}">Política de Privacidad</a></li>
                 <li><a href="{{ url_for('terms_of_service') }}">Términos de Servicio</a></li>
@@ -113,6 +120,149 @@
                 userBtn.addEventListener('click', (e) => { e.stopPropagation(); userBox.classList.toggle('open'); });
                 document.addEventListener('click', () => userBox.classList.remove('open'));
             }
+        })();
+
+        // ---------- Avisos (notificaciones push) ----------
+        (function () {
+            const item = document.getElementById('pushItem');
+            const btn = document.getElementById('pushBtn');
+            const testBtn = document.getElementById('pushTestBtn');
+            const msg = document.getElementById('pushMsg');
+            if (!item || !btn) return;
+            const soportado = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+            const esIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+            const instalada = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+            item.hidden = false;
+
+            function estado(texto, activo) {
+                btn.textContent = activo ? '🔔 Avisos activos' : '🔔 Activar avisos';
+                btn.classList.toggle('on', !!activo);
+                testBtn.hidden = !activo;
+                msg.textContent = texto || '';
+            }
+            function b64aBytes(b64) {
+                const pad = '='.repeat((4 - b64.length % 4) % 4);
+                const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+                return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+            }
+            async function enviarAlServidor(sub) {
+                const r = await fetch('/push/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sub) });
+                if (!r.ok) throw new Error('servidor');
+            }
+
+            if (!soportado) {
+                if (esIOS && !instalada) estado('En iPhone primero instala la app: Compartir → "Agregar a inicio".');
+                else estado('Este navegador no admite avisos.');
+                btn.disabled = true;
+                return;
+            }
+
+            // Si ya estaban activos, renovar en silencio
+            navigator.serviceWorker.ready.then(async (reg) => {
+                const sub = await reg.pushManager.getSubscription();
+                if (sub && Notification.permission === 'granted') {
+                    estado('', true);
+                    enviarAlServidor(sub.toJSON()).catch(() => {});
+                } else if (Notification.permission === 'denied') {
+                    estado('Bloqueaste los avisos. Actívalos en los permisos del sitio.');
+                }
+            });
+
+            btn.addEventListener('click', async () => {
+                try {
+                    const reg = await navigator.serviceWorker.ready;
+                    const actual = await reg.pushManager.getSubscription();
+                    if (actual && Notification.permission === 'granted') {   // ya activos → desactivar
+                        await fetch('/push/unsubscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: actual.endpoint }) });
+                        await actual.unsubscribe();
+                        estado('Avisos desactivados en este celular.', false);
+                        return;
+                    }
+                    const permiso = await Notification.requestPermission();
+                    if (permiso !== 'granted') { estado('No diste permiso para avisos.'); return; }
+                    const r = await fetch('/push/vapid-public-key');
+                    const info = await r.json();
+                    if (!info.key) { estado('Los avisos aún no están configurados en el servidor.'); return; }
+                    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64aBytes(info.key) });
+                    await enviarAlServidor(sub.toJSON());
+                    estado('Listo. Te llegarán los avisos aunque la app esté cerrada.', true);
+                } catch (e) {
+                    console.warn('Avisos:', e);
+                    estado('No se pudieron activar los avisos. Intenta de nuevo.');
+                }
+            });
+
+            testBtn.addEventListener('click', async () => {
+                testBtn.disabled = true;
+                try {
+                    const r = await (await fetch('/push/test', { method: 'POST' })).json();
+                    msg.textContent = r.enviados ? `Aviso enviado a ${r.enviados} dispositivo(s).` : 'No se envió. Revisa la configuración del servidor.';
+                } catch (e) { msg.textContent = 'No se pudo enviar la prueba.'; }
+                testBtn.disabled = false;
+            });
+        })();
+
+        // ---------- Marca "🚨 Pendiente de asesor" en Chats / Kanban ----------
+        (function () {
+            const hayChats = () => document.querySelector('[data-chat-num], .chat-panel-header[data-num]');
+            if (!hayChats()) return;
+            let pendientes = new Map();
+
+            function tiempo(m) { return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ' ' + (m % 60) + ' min' : ''}`; }
+
+            function pintar() {
+                // Tarjetas de la lista de chats y del kanban
+                document.querySelectorAll('[data-chat-num]').forEach(el => {
+                    const p = pendientes.get(el.dataset.chatNum);
+                    el.classList.toggle('pend-asesor', !!p);
+                    let b = el.querySelector(':scope .pend-badge');
+                    if (p && !b) {
+                        b = document.createElement('span');
+                        b.className = 'pend-badge';
+                        (el.querySelector('.card-name-section') || el).appendChild(b);
+                    }
+                    if (p) { b.textContent = '🚨 Asesor'; b.title = `Esperando asesor desde hace ${tiempo(p.minutos)}${p.asesor ? ' · ' + p.asesor : ''}`; }
+                    else if (b) b.remove();
+                });
+                // Encabezado del chat abierto: aviso + botón "Marcar atendido"
+                const head = document.querySelector('.chat-panel-header[data-num]');
+                if (head) {
+                    const num = head.dataset.num, p = pendientes.get(num);
+                    let bar = document.getElementById('pendBar');
+                    if (p && !bar) {
+                        bar = document.createElement('div');
+                        bar.id = 'pendBar';
+                        bar.className = 'pend-bar';
+                        bar.innerHTML = '<span class="pend-bar-txt"></span><button type="button" class="pend-bar-btn">✅ Marcar atendido</button>';
+                        head.insertAdjacentElement('afterend', bar);
+                        bar.querySelector('button').addEventListener('click', async (ev) => {
+                            ev.target.disabled = true;
+                            try {
+                                const r = await fetch(`/chats/${encodeURIComponent(num)}/atendido`, { method: 'POST' });
+                                if (r.ok) { pendientes.delete(num); pintar(); return; }
+                            } catch (e) {}
+                            ev.target.disabled = false;
+                        });
+                    }
+                    if (p) bar.querySelector('.pend-bar-txt').textContent =
+                        `🚨 Esperando asesor desde hace ${tiempo(p.minutos)}${p.asesor ? ' · ' + p.asesor : ''}`;
+                    else if (bar) bar.remove();
+                }
+            }
+
+            async function cargar() {
+                try {
+                    const r = await (await fetch('/push/pendientes', { cache: 'no-store' })).json();
+                    pendientes = new Map((r.pendientes || []).map(p => [p.numero, p]));
+                    pintar();
+                } catch (e) {}
+            }
+            cargar();
+            setInterval(cargar, 20000);
+            // Las listas se redibujan solas cada pocos segundos: volver a poner la marca
+            let t = null;
+            new MutationObserver(() => { clearTimeout(t); t = setTimeout(pintar, 150); })
+                .observe(document.querySelector('.main-content') || document.body, { childList: true, subtree: true });
         })();
 
         // Registrar el service worker (necesario para "Instalar app")
@@ -305,6 +455,39 @@
                 transform: translateY(0);
             }
         }
+
+        /* === Botón de avisos (push) === */
+        .push-item { display: flex; flex-direction: column; gap: 6px; }
+        .push-btn, .push-test {
+            width: 100%; text-align: left; cursor: pointer; font: inherit;
+            border-radius: 4px; border: 1px solid rgba(255,255,255,.25);
+            background: transparent; color: #fff; padding: 8px 12px;
+        }
+        .push-btn.on { background: rgba(37,211,102,.18); border-color: rgba(37,211,102,.6); }
+        .push-btn:disabled { opacity: .55; cursor: default; }
+        .push-test { font-size: .8rem; padding: 6px 12px; opacity: .85; }
+        .push-msg { font-size: .75rem; opacity: .8; line-height: 1.3; }
+
+        /* === Pendiente de asesor === */
+        .pend-badge {
+            display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 10px;
+            background: #e53935; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .3px;
+            white-space: nowrap; vertical-align: middle; animation: pendPulse 2s ease-in-out infinite;
+        }
+        .card-name-section .pend-badge { align-self: flex-start; margin: 2px 0 0; }
+        .pend-asesor { box-shadow: inset 0 0 0 2px #e53935 !important; }
+        @keyframes pendPulse { 0%,100% { opacity: 1 } 50% { opacity: .6 } }
+        .pend-bar {
+            display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+            margin: 6px; padding: 8px 10px; border-radius: 8px; flex-shrink: 0;
+            background: rgba(229,57,53,.15); border: 1px solid rgba(229,57,53,.6); color: #fff; font-size: 13px;
+        }
+        .pend-bar-btn {
+            background: #2e7d32; color: #fff; border: 0; border-radius: 6px; padding: 6px 10px;
+            font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap;
+        }
+        .pend-bar-btn:disabled { opacity: .6; }
+        @media (max-width:768px) { .chat-panel-v2 .pend-bar { order: 1 !important; } .chat-panel-v2 .msgs-wrap-v2 { order: 2 !important; } }
 
         /* === Celular: barra superior + menú tipo cajón === */
         .mobile-topbar, .sidebar-overlay { display: none; }
