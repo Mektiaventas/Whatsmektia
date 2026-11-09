@@ -10173,7 +10173,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
     texto_norm = (texto or "").strip().lower()
     if detectar_intervencion_humana_ia(texto_norm, numero, config):
         app.logger.info(f"⚠️ [HUMANO] El usuario {numero} requiere atención de un asesor.")
-        exito_paso = pasar_contacto_asesor(numero, config=config, historial_inyectado=historial_final)
+        exito_paso = pasar_contacto_asesor(numero, config=config, notificar_asesor=True, historial_final=historial_final)
         if exito_paso:
             mensaje_confirmacion = "Entiendo. He solicitado que uno de nuestros asesores humanos tome el control de la conversación. Te contactarán por este medio a la brevedad. 👨‍💼"
             enviar_mensaje(numero, mensaje_confirmacion, config)
