@@ -101,6 +101,10 @@
             min-height: 460px;
         }
     }
+    /* Página vertical "Celular": más alto, el reporte se desliza dentro */
+    @media (max-width: 768px) {
+        .iframe-container.pbi-vertical { height: calc(100dvh - 54px - env(safe-area-inset-top) - 110px); min-height: 560px; }
+    }
     /* Celular acostado: aprovechar todo el alto */
     @media (max-width: 950px) and (orientation: landscape) and (max-height: 500px) {
         .iframe-container { padding-bottom: 0; height: calc(100dvh - 24px); min-height: 0; }
@@ -128,16 +132,42 @@
             <h3><span style="color: #f2c811;">📊</span> Reporte de Negocio</h3>
             <div class="pbi-actions">
                 <button type="button" class="pbi-btn" id="pbiFullscreenBtn" title="Ver en pantalla completa">⛶ Completa</button>
-                <a class="pbi-btn" href="{{ pbi_url }}" target="_blank" rel="noopener" title="Abrir el reporte solo">↗ Abrir</a>
+                <a class="pbi-btn" id="pbiAbrir" href="{{ pbi_url }}" target="_blank" rel="noopener" title="Abrir el reporte solo">↗ Abrir</a>
             </div>
         </div>
         <div class="iframe-container" id="pbiContainer">
             <iframe 
+                id="pbiFrame"
                 title="Dashboard Power BI" 
-                src="{{ pbi_url }}" 
+                data-src="{{ pbi_url }}" 
                 style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none;" 
                 allowFullScreen="true">
             </iframe>
+            <script>
+                // En celular se abre la página vertical del reporte ("Celular").
+                // "Publicar en la web" ignora el diseño para teléfono, así que usamos una página aparte.
+                // Clave = "k" del link público (no cambia al volver a publicar) → id de la página vertical.
+                (function () {
+                    const PAGINA_CELULAR = {
+                        'd1e8c264-9289-430d-9937-8680a03cd5ca': '8942608feee8c1814c63'   // Status_All_Smartwhats
+                    };
+                    const frame = document.getElementById('pbiFrame');
+                    const abrir = document.getElementById('pbiAbrir');
+                    let url = frame.dataset.src;
+                    try {
+                        const u = new URL(url);
+                        const k = JSON.parse(atob(u.searchParams.get('r') || '')).k;
+                        const esCel = window.matchMedia('(max-width: 768px)').matches;
+                        if (esCel && PAGINA_CELULAR[k]) {
+                            u.searchParams.set('pageName', PAGINA_CELULAR[k]);
+                            url = u.toString();
+                            document.getElementById('pbiContainer').classList.add('pbi-vertical');
+                        }
+                    } catch (e) { /* link sin formato esperado: se usa tal cual */ }
+                    frame.src = url;
+                    if (abrir) abrir.href = url;
+                })();
+            </script>
         </div>
     </div>
     {% else %}
