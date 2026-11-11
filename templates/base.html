@@ -321,6 +321,65 @@
                 .observe(document.querySelector('.main-content') || document.body, { childList: true, subtree: true });
         })();
 
+        // ---------- Chats de LinkedIn (li_…): ícono propio y "Responder en LinkedIn" ----------
+        (function () {
+            const ICONO_LI = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#0A66C2"/>' +
+                '<rect x="13" y="25" width="9" height="27" fill="#fff"/><circle cx="17.5" cy="16.5" r="5.3" fill="#fff"/>' +
+                '<path d="M28 25h8.6v3.8c1.3-2.3 4.3-4.5 8.7-4.5 8.4 0 9.7 5.4 9.7 12.5V52h-9V38.4c0-3.3-.1-7.4-4.5-7.4s-5.2 3.5-5.2 7.2V52H28z" fill="#fff"/></svg>');
+            const hay = () => document.querySelector('[data-chat-num^="li_"], .chat-panel-header[data-num^="li_"]');
+            if (!hay()) return;
+            const cache = {};
+
+            async function datosHilo(num) {
+                if (!cache[num]) cache[num] = fetch(`/linkedin/hilo/${encodeURIComponent(num)}`).then(r => r.ok ? r.json() : null).catch(() => null);
+                return cache[num];
+            }
+
+            function pintar() {
+                document.querySelectorAll('[data-chat-num^="li_"]').forEach(el => {
+                    const img = el.querySelector('img.card-avatar, .card-avatar img, img');
+                    if (img && img.dataset.li !== '1') { img.src = ICONO_LI; img.dataset.li = '1'; }
+                    const alias = el.querySelector('.alias-view');
+                    if (alias) { alias.classList.add('is-linkedin'); alias.style.setProperty('color', '#70b5f9', 'important'); }
+                });
+
+                const head = document.querySelector('.chat-panel-header[data-num^="li_"]');
+                if (!head || document.getElementById('liBar')) return;
+                const num = head.dataset.num;
+                const himg = head.querySelector('img.card-avatar');
+                if (himg) himg.src = ICONO_LI;
+                const hnum = head.querySelector('.chat-number');
+                if (hnum) hnum.textContent = 'LinkedIn';
+                // Estos chats se contestan en LinkedIn: ocultar caja de respuesta y aviso de IA
+                document.querySelectorAll('.chat-panel-v2 .reply-form, .chat-panel-v2 .ia-active-message, .chat-controls').forEach(x => x.style.display = 'none');
+
+                const bar = document.createElement('div');
+                bar.id = 'liBar';
+                bar.className = 'li-bar';
+                bar.innerHTML = '<div class="li-bar-txt"><b>💼 Conversación de LinkedIn</b><span class="li-bar-sub">Cargando…</span></div>' +
+                                '<div class="li-bar-btns"><a class="li-btn" target="_blank" rel="noopener">Responder en LinkedIn ↗</a>' +
+                                '<a class="li-btn li-btn-sec" target="_blank" rel="noopener" hidden>Ver perfil</a></div>';
+                head.insertAdjacentElement('afterend', bar);
+
+                datosHilo(num).then(d => {
+                    const sub = bar.querySelector('.li-bar-sub');
+                    const [resp, perfil] = bar.querySelectorAll('.li-btn');
+                    if (!d || !d.ok) { sub.textContent = 'Ábrela en LinkedIn para leer y contestar.'; resp.href = 'https://www.linkedin.com/messaging/'; return; }
+                    sub.textContent = (d.nombre || '') + (d.titular ? ' · ' + d.titular : '');
+                    resp.href = d.hilo_url;
+                    if (d.perfil_url) { perfil.href = d.perfil_url; perfil.hidden = false; }
+                    resp.addEventListener('click', () => {   // al abrirla, se da por leída
+                        fetch(`/chats/${encodeURIComponent(num)}/marcar-leido`, { method: 'POST' }).catch(() => {});
+                    });
+                });
+            }
+            pintar();
+            let t = null;
+            new MutationObserver(() => { clearTimeout(t); t = setTimeout(pintar, 150); })
+                .observe(document.querySelector('.main-content') || document.body, { childList: true, subtree: true });
+        })();
+
         // Registrar el service worker (necesario para "Instalar app")
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
@@ -545,6 +604,20 @@
         }
         .pend-bar-btn:disabled { opacity: .6; }
         @media (max-width:768px) { .chat-panel-v2 .pend-bar { order: 1 !important; } .chat-panel-v2 .msgs-wrap-v2 { order: 2 !important; } }
+
+        /* === Chats de LinkedIn === */
+        .alias-view.is-linkedin { color: #70b5f9 !important; }
+        .li-bar {
+            display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+            margin: 6px; padding: 10px 12px; border-radius: 10px; flex-shrink: 0;
+            background: rgba(10,102,194,.18); border: 1px solid rgba(10,102,194,.7); color: #fff;
+        }
+        .li-bar-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+        .li-bar-sub { font-size: 12px; opacity: .85; overflow: hidden; text-overflow: ellipsis; }
+        .li-bar-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+        .li-btn { background: #0A66C2; color: #fff !important; text-decoration: none; padding: 8px 14px; border-radius: 18px; font-weight: 700; font-size: 13px; white-space: nowrap; }
+        .li-btn-sec { background: transparent; border: 1px solid #70b5f9; color: #70b5f9 !important; }
+        @media (max-width:768px) { .chat-panel-v2 .li-bar { order: 1 !important; } }
 
         /* === Celular: barra superior + menú tipo cajón === */
         .mobile-topbar, .sidebar-overlay { display: none; }
