@@ -11,6 +11,8 @@ import imaplib
 import json
 import logging
 import os
+import socket
+import ssl
 import time
 
 import requests
@@ -312,12 +314,7 @@ def probar_linkedin(dominio):
     pw = (c or {}).get('secreto', {}).get('password') if c else None
     if not (correo and pw):
         raise ValueError('Faltan el correo o la contraseña de aplicación')
-    host = 'imap.gmail.com'
-    try:
-        m = imaplib.IMAP4_SSL(host, 993, timeout=15)
-        m.login(correo, pw.replace(' ', ''))
-    except imaplib.IMAP4.error:
-        raise ValueError('Google rechazó el acceso. Revisa el correo y la contraseña de aplicación (16 letras).')
+    m = conectar_gmail(correo, pw)
     try:
         m.select('INBOX', readonly=True)
         import datetime
@@ -330,6 +327,34 @@ def probar_linkedin(dominio):
         except Exception:
             pass
     return f"Conectado a {correo}. Avisos de LinkedIn en los últimos 7 días: {n}"
+
+
+class _IMAP4SSL_IPv4(imaplib.IMAP4_SSL):
+    """Igual que IMAP4_SSL pero conectando solo por IPv4.
+    Algunos servidores (p. ej. Oracle Cloud) no tienen salida por IPv6 y Python intenta IPv6 primero."""
+    def _create_socket(self, timeout):
+        ultimo = None
+        for fam, tipo, proto, _, addr in socket.getaddrinfo(self.host, self.port, socket.AF_INET, socket.SOCK_STREAM):
+            try:
+                sock = socket.socket(fam, tipo, proto)
+                sock.settimeout(timeout)
+                sock.connect(addr)
+                return self.ssl_context.wrap_socket(sock, server_hostname=self.host)
+            except OSError as e:
+                ultimo = e
+        raise ultimo or OSError('No se pudo resolver ' + self.host)
+
+
+def conectar_gmail(correo, password, timeout=15):
+    try:
+        m = _IMAP4SSL_IPv4('imap.gmail.com', 993, ssl_context=ssl.create_default_context(), timeout=timeout)
+    except OSError as e:
+        raise ValueError(f'El servidor no pudo conectarse a Gmail (imap.gmail.com:993): {e}')
+    try:
+        m.login(correo, password.replace(' ', ''))
+    except imaplib.IMAP4.error:
+        raise ValueError('Google rechazó el acceso. Revisa el correo y la contraseña de aplicación (16 letras).')
+    return m
 
 
 # ==================== Para el resto de la app ====================
