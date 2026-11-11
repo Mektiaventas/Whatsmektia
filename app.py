@@ -1523,6 +1523,130 @@ def chat_marcar_atendido(numero):
         return jsonify({'ok': False}), 500
 
 iniciar_recordatorios()
+
+# ---------- Configuración → Redes sociales ----------
+import canales as _canales
+from canales import aplicar_a_config as canales_aplicar_a_config, dominio_por as _canales_dominio_por
+
+def canales_dominio_por(canal, valor):
+    try:
+        return _canales_dominio_por(canal, valor)
+    except Exception as e:
+        app.logger.warning(f"⚠️ Canales: búsqueda {canal} falló: {e}")
+        return None
+
+def config_por_dominio(dominio):
+    """Como obtener_configuracion_por_host(), pero sin request (para webhooks)."""
+    try:
+        from services import get_cliente_by_subdomain
+        config = get_cliente_by_subdomain(dominio)
+        if not config:
+            return None
+        config['phone_number_id'] = config.get('wa_phone_id')
+        config['whatsapp_token'] = config.get('wa_token')
+        try:
+            conn = get_db_connection({'db_name': dominio})
+            cur = conn.cursor(dictionary=True)
+            cur.execute("SELECT * FROM configuracion LIMIT 1")
+            datos_ia = cur.fetchone()
+            cur.close(); conn.close()
+            if datos_ia:
+                config.update(datos_ia)
+        except Exception as ex:
+            app.logger.error(f"❌ config_por_dominio: BD '{dominio}': {ex}")
+        return canales_aplicar_a_config(config, dominio)
+    except Exception as e:
+        app.logger.error(f"🔴 config_por_dominio({dominio}): {e}")
+        return None
+
+def _dominio_actual():
+    partes = request.host.lower().split(':')[0].split('.')
+    return partes[0] if len(partes) >= 2 else None
+
+@app.route('/canales/estado')
+@login_required
+def canales_estado():
+    dom = _dominio_actual()
+    try:
+        r = _canales.resumen(dom)
+        r['dominio'] = dom
+        r['url_base'] = f"https://{request.host}"
+        return jsonify({'ok': True, **r})
+    except Exception as e:
+        app.logger.error(f"🔴 canales_estado: {e}")
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/canales/<canal>/guardar', methods=['POST'])
+@login_required
+def canales_guardar(canal):
+    dom = _dominio_actual()
+    d = request.get_json(silent=True) or {}
+    v = lambda k: (d.get(k) or '').strip()
+    try:
+        if canal == 'whatsapp':
+            if not v('phone_id'):
+                return jsonify({'ok': False, 'error': 'Escribe el Phone ID'}), 400
+            _canales.guardar_whatsapp(dom, v('phone_id'), v('token') or None)
+        elif canal == 'messenger':
+            if not v('page_id'):
+                return jsonify({'ok': False, 'error': 'Escribe el Page ID'}), 400
+            _canales.guardar_canal(dom, 'messenger', {'page_id': v('page_id')}, {'token': v('token')}, buscar=v('page_id'))
+        elif canal == 'telegram':
+            actual = _canales.obtener_canal(dom, 'telegram', con_secreto=True) or {}
+            token = v('token') or (actual.get('secreto') or {}).get('token')
+            if not token:
+                return jsonify({'ok': False, 'error': 'Pega el token del bot'}), 400
+            _canales.guardar_canal(dom, 'telegram', actual.get('datos') or {}, {'token': token},
+                                   buscar=_canales._hash(token))
+        elif canal == 'linkedin':
+            if '@' not in v('correo'):
+                return jsonify({'ok': False, 'error': 'Escribe un correo válido'}), 400
+            _canales.guardar_canal(dom, 'linkedin', {'correo': v('correo')}, {'password': v('password').replace(' ', '')})
+        else:
+            return jsonify({'ok': False, 'error': 'Canal no disponible'}), 400
+        return jsonify({'ok': True})
+    except RuntimeError as e:   # falta CANALES_KEY
+        return jsonify({'ok': False, 'error': str(e)}), 500
+    except Exception as e:
+        app.logger.error(f"🔴 canales_guardar {canal}: {e}")
+        return jsonify({'ok': False, 'error': 'No se pudo guardar'}), 500
+
+@app.route('/canales/<canal>/probar', methods=['POST'])
+@login_required
+def canales_probar(canal):
+    dom = _dominio_actual()
+    try:
+        if canal == 'whatsapp':
+            msg = _canales.probar_whatsapp(dom)
+        elif canal == 'messenger':
+            msg = _canales.probar_messenger(dom)
+        elif canal == 'telegram':
+            msg = _canales.probar_telegram(dom, f"https://{request.host}")
+        elif canal == 'linkedin':
+            msg = _canales.probar_linkedin(dom)
+        else:
+            return jsonify({'ok': False, 'error': 'Canal no disponible'}), 400
+        _canales.marcar_estado(dom, canal, 'ok', msg)
+        return jsonify({'ok': True, 'mensaje': msg})
+    except Exception as e:
+        try:
+            _canales.marcar_estado(dom, canal, 'error', str(e))
+        except Exception:
+            pass
+        app.logger.warning(f"⚠️ canales_probar {canal} ({dom}): {e}")
+        return jsonify({'ok': False, 'error': str(e)})
+
+@app.route('/canales/<canal>/quitar', methods=['POST'])
+@login_required
+def canales_quitar(canal):
+    if canal not in ('messenger', 'telegram', 'linkedin'):
+        return jsonify({'ok': False, 'error': 'No se puede quitar este canal aquí'}), 400
+    try:
+        _canales.desactivar_canal(_dominio_actual(), canal)
+        return jsonify({'ok': True})
+    except Exception as e:
+        app.logger.error(f"🔴 canales_quitar {canal}: {e}")
+        return jsonify({'ok': False, 'error': 'No se pudo quitar'}), 500
 # ==================== FIN PWA ====================
     
 @app.route('/uploads/productos/<path:filename>')
@@ -3602,7 +3726,7 @@ def debug_dominio():
 
 # --- Modificación en la definición de la función ---
 
-SUBTABS = ['negocio', 'personalizacion', 'precios', 'restricciones', 'asesores', 'leads']
+SUBTABS = ['negocio', 'personalizacion', 'precios', 'restricciones', 'asesores', 'leads', 'redes']
 
 # app.py (Reemplazar kanban_data)
 @app.route('/debug-hora')
@@ -8512,6 +8636,17 @@ def obtener_configuracion_por_page_id(page_id):
             app.logger.info(f"✅ MESSENGER (Debug): Configuración detectada por Page ID {page_id}: {config.get('dominio')}")
             return config
             
+    # Páginas conectadas desde Configuración → Redes sociales
+    try:
+        _dom = canales_dominio_por('messenger', str(page_id))
+        if _dom:
+            config = config_por_dominio(_dom)
+            if config:
+                app.logger.info(f"✅ MESSENGER: Page ID {page_id} → {_dom} (Redes sociales)")
+                return config
+    except Exception as e:
+        app.logger.warning(f"⚠️ MESSENGER: error buscando Page ID en Redes sociales: {e}")
+
     app.logger.warning(f"⚠️ MESSENGER (Debug): Page ID {page_id} NO ENCONTRADO en FACEBOOK_PAGE_MAP. Usando config por defecto/host.")
     return obtener_configuracion_por_host()
 
@@ -11715,7 +11850,9 @@ def obtener_configuracion_por_host():
                 
         except Exception as ex:
             app.logger.error(f"❌ Error al conectar a la BD del cliente '{tenant_db}': {ex}")
-            
+
+        # 5. Tokens de Telegram / Messenger guardados en Configuración → Redes sociales
+        canales_aplicar_a_config(config, subdominio)
         return config
 
     except Exception as e:
@@ -13303,6 +13440,14 @@ def telegram_webhook_multitenant(token_bot):
             if cfg.get('telegram_token') == token_bot:
                 config = cfg
                 break
+
+        if not config:
+            # Bots conectados desde Configuración → Redes sociales
+            _dom = canales_dominio_por('telegram', token_bot)
+            if _dom:
+                config = config_por_dominio(_dom)
+                if config:
+                    config['telegram_token'] = token_bot
         
         if not config:
             app.logger.error(f"🔴 TELEGRAM: Token no reconocido: {token_bot[:10]}...")
