@@ -178,6 +178,34 @@ def desactivar_canal(dominio, canal):
         conn.close()
 
 
+def actualizar_datos(dominio, canal, datos):
+    """Cambia solo 'datos' (sin tocar secretos ni estado)."""
+    _asegurar_tabla()
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE cliente_canales SET datos=%s WHERE dominio=%s AND canal=%s",
+                    (json.dumps(datos or {}, ensure_ascii=False), dominio, canal))
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
+
+
+def dominios_con(canal):
+    """Clientes que tienen ese canal conectado."""
+    _asegurar_tabla()
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT dominio FROM cliente_canales WHERE canal=%s AND activo=1 AND secreto IS NOT NULL", (canal,))
+        r = [x[0] for x in cur.fetchall()]
+        cur.close()
+        return r
+    finally:
+        conn.close()
+
+
 def dominio_por(canal, valor):
     """Busca qué cliente tiene ese Page ID (messenger) o ese token (telegram, por su hash)."""
     if not valor:
