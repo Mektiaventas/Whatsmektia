@@ -45,7 +45,7 @@
     }
 </style>
 <div class="config-header">
-    <h2>Configuración: {{ active|capitalize }}</h2>
+    <h2>Configuración: {{ {'redes': 'Redes sociales'}.get(active, active|capitalize) }}</h2>
     {% if guardado %}
     <div class="alert success">¡Guardado correctamente!</div>
     {% endif %}
@@ -55,7 +55,7 @@
 <ul class="tabs">
     {% for tab in tabs %}
     <li class="tab-{{ tab }} {{ 'active' if tab == active else '' }}">
-        <a href="{{ url_for('configuracion_tab', tab=tab) }}">{{ tab|capitalize }}</a>
+        <a href="{{ url_for('configuracion_tab', tab=tab) }}">{{ {'redes': 'Redes sociales'}.get(tab, tab|capitalize) }}</a>
     </li>
     {% endfor %}
 </ul>
@@ -371,5 +371,190 @@ gratis, inmediato, garantizado, prometo, seguro">{{ datos.palabras_prohibidas or
         <button type="submit" class="btn-primary">Guardar Asesores</button>
     </div>
 </form>
+{% elif active == 'redes' %}
+<div class="redes-wrap" id="redesApp">
+    <p class="redes-intro">Conecta aquí los canales de este cliente. Los tokens y contraseñas se guardan cifrados y nunca se vuelven a mostrar completos.</p>
+    <div class="redes-aviso" id="redesCifrado" hidden>⚠️ El servidor todavía no tiene la llave de cifrado (<code>CANALES_KEY</code>). Hasta que se configure, no se pueden guardar tokens ni contraseñas.</div>
+
+    <!-- WhatsApp -->
+    <section class="red-card" data-canal="whatsapp">
+        <header><span class="red-ico" style="background:#25D366">🟢</span><h3>WhatsApp</h3><span class="red-estado"></span></header>
+        <label>Phone number ID</label>
+        <input class="input" name="phone_id" placeholder="Ej: 868179933054487">
+        <label>Token de acceso (Meta)</label>
+        <input class="input" name="token" type="password" autocomplete="off" placeholder="Déjalo vacío para conservar el actual">
+        <small class="red-ayuda">Webhook en Meta: <code class="red-url" data-path="/webhook"></code></small>
+        <div class="red-botones"><button class="red-guardar">Guardar</button><button class="red-probar">Probar conexión</button></div>
+        <p class="red-msg"></p>
+    </section>
+
+    <!-- Messenger -->
+    <section class="red-card" data-canal="messenger">
+        <header><span class="red-ico" style="background:#0084FF">💬</span><h3>Messenger</h3><span class="red-estado"></span></header>
+        <label>Page ID de Facebook</label>
+        <input class="input" name="page_id" placeholder="Ej: 106543219876543">
+        <label>Token de acceso de la página</label>
+        <input class="input" name="token" type="password" autocomplete="off" placeholder="Déjalo vacío para conservar el actual">
+        <small class="red-ayuda">Webhook en Meta: <code class="red-url" data-path="/messenger_webhook"></code></small>
+        <div class="red-botones"><button class="red-guardar">Guardar</button><button class="red-probar">Probar conexión</button><button class="red-quitar">Quitar</button></div>
+        <p class="red-msg"></p>
+    </section>
+
+    <!-- Telegram -->
+    <section class="red-card" data-canal="telegram">
+        <header><span class="red-ico" style="background:#229ED9">✈️</span><h3>Telegram</h3><span class="red-estado"></span></header>
+        <label>Token del bot (de @BotFather)</label>
+        <input class="input" name="token" type="password" autocomplete="off" placeholder="Ej: 123456789:AAH...">
+        <small class="red-ayuda">Al tocar <b>Conectar</b> se valida el bot y se registra solo el webhook en Telegram.</small>
+        <div class="red-botones"><button class="red-guardar">Guardar</button><button class="red-probar">Conectar</button><button class="red-quitar">Quitar</button></div>
+        <p class="red-msg"></p>
+    </section>
+
+    <!-- LinkedIn -->
+    <section class="red-card" data-canal="linkedin">
+        <header><span class="red-ico" style="background:#0A66C2">in</span><h3>LinkedIn</h3><span class="red-estado"></span></header>
+        <label>Correo donde llegan los avisos de LinkedIn (Gmail)</label>
+        <input class="input" name="correo" type="email" placeholder="tucorreo@gmail.com">
+        <label>Contraseña de aplicación de Google (16 letras)</label>
+        <input class="input" name="password" type="password" autocomplete="off" placeholder="Déjala vacía para conservar la actual">
+        <details class="red-pasos">
+            <summary>¿Cómo obtengo la contraseña de aplicación?</summary>
+            <ol>
+                <li>Activa la <b>verificación en 2 pasos</b> en tu cuenta de Google (myaccount.google.com → Seguridad).</li>
+                <li>Entra a <b>myaccount.google.com/apppasswords</b>.</li>
+                <li>Nombre: <i>Vendedor Virtual LinkedIn</i> → <b>Crear</b>.</li>
+                <li>Copia el código de 16 letras y pégalo aquí.</li>
+            </ol>
+            <p>Solo se leen los avisos que LinkedIn manda a ese correo. Los mensajes se contestan en LinkedIn.</p>
+        </details>
+        <div class="red-botones"><button class="red-guardar">Guardar</button><button class="red-probar">Probar conexión</button><button class="red-quitar">Quitar</button></div>
+        <p class="red-msg"></p>
+    </section>
+
+    <!-- Instagram -->
+    <section class="red-card red-pronto" data-canal="instagram">
+        <header><span class="red-ico" style="background:linear-gradient(45deg,#f58529,#dd2a7b,#8134af)">📷</span><h3>Instagram</h3><span class="red-estado">Próximamente</span></header>
+        <p class="red-ayuda">Requiere que Meta apruebe el permiso de mensajes de Instagram para la app. Cuando esté aprobado se activa aquí.</p>
+    </section>
+</div>
+
+<style>
+    .redes-wrap { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; align-items: start; }
+    .redes-intro, .redes-aviso { grid-column: 1 / -1; margin: 0; color: #cfd8e3; }
+    .redes-aviso { background: rgba(255,193,7,.12); border: 1px solid rgba(255,193,7,.5); border-radius: 8px; padding: 10px 12px; color: #ffe08a; }
+    .red-card { background: #eceef1; color: #1f2937; border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 6px; }
+    .red-card header { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+    .red-card h3 { margin: 0; font-size: 1.1rem; flex: 1; }
+    .red-ico { width: 32px; height: 32px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; color: #fff; font-weight: 800; font-size: 15px; flex-shrink: 0; }
+    .red-estado { font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: #d6dae0; color: #4b5563; white-space: nowrap; }
+    .red-estado.ok { background: #d1fae5; color: #047857; }
+    .red-estado.error { background: #fee2e2; color: #b91c1c; }
+    .red-estado.pendiente { background: #fef3c7; color: #92400e; }
+    .red-card label { font-size: 13px; font-weight: 600; margin-top: 4px; }
+    .red-card .input { width: 100%; box-sizing: border-box; }
+    .red-ayuda { font-size: 12px; color: #4b5563; line-height: 1.4; }
+    .red-ayuda code { background: #fff; padding: 1px 5px; border-radius: 4px; word-break: break-all; }
+    .red-botones { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+    .red-botones button { border: 0; border-radius: 8px; padding: 8px 14px; font-weight: 600; cursor: pointer; }
+    .red-guardar { background: #002663; color: #fff; }
+    .red-probar { background: #FFC20E; color: #002663; }
+    .red-quitar { background: transparent; color: #b91c1c; border: 1px solid #fca5a5 !important; margin-left: auto; }
+    .red-botones button:disabled { opacity: .55; cursor: default; }
+    .red-msg { margin: 4px 0 0; font-size: 13px; min-height: 1em; }
+    .red-msg.ok { color: #047857; } .red-msg.error { color: #b91c1c; }
+    .red-pasos { font-size: 13px; background: #fff; border-radius: 8px; padding: 8px 10px; }
+    .red-pasos summary { cursor: pointer; font-weight: 600; color: #0A66C2; }
+    .red-pasos ol { margin: 8px 0 4px 18px; padding: 0; }
+    .red-pronto { opacity: .75; }
+    @media (max-width: 768px) { .redes-wrap { grid-template-columns: 1fr; } .red-quitar { margin-left: 0; } }
+</style>
+
+<script>
+(function () {
+    const app = document.getElementById('redesApp');
+    if (!app) return;
+    const ETIQ = { ok: '🟢 Conectado', error: '🔴 Con error', sin_probar: '🟡 Sin probar', no: '⚪ Sin configurar' };
+
+    function pintarEstado(card, info) {
+        const tag = card.querySelector('.red-estado');
+        let e = 'no';
+        if (info && info.configurado) e = info.estado || 'sin_probar';
+        tag.textContent = ETIQ[e] || ETIQ.no;
+        tag.className = 'red-estado ' + (e === 'ok' ? 'ok' : e === 'error' ? 'error' : e === 'sin_probar' ? 'pendiente' : '');
+        const q = card.querySelector('.red-quitar');
+        if (q) q.hidden = !(info && info.configurado);
+    }
+    function msg(card, texto, tipo) {
+        const p = card.querySelector('.red-msg');
+        p.textContent = texto || '';
+        p.className = 'red-msg ' + (tipo || '');
+    }
+    async function post(url, body) {
+        const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+        let j = {};
+        try { j = await r.json(); } catch (e) { j = { ok: false, error: 'Respuesta inválida del servidor' }; }
+        return j;
+    }
+
+    async function cargar() {
+        let d;
+        try { d = await (await fetch('/canales/estado', { cache: 'no-store' })).json(); } catch (e) { return; }
+        if (!d.ok) return;
+        document.getElementById('redesCifrado').hidden = !!d.cifrado_listo;
+        app.querySelectorAll('.red-url').forEach(c => c.textContent = d.url_base + c.dataset.path);
+        app.querySelectorAll('.red-card[data-canal]').forEach(card => {
+            const canal = card.dataset.canal, info = d[canal];
+            if (!info) return;
+            pintarEstado(card, info);
+            const set = (n, v) => { const i = card.querySelector(`[name="${n}"]`); if (i && v !== undefined) i.value = v; };
+            const ph = (n, v) => { const i = card.querySelector(`[name="${n}"]`); if (i && v) i.placeholder = 'Guardado: ' + v + ' (vacío = conservar)'; };
+            if (canal === 'whatsapp') { set('phone_id', info.phone_id); ph('token', info.token); }
+            if (canal === 'messenger') { set('page_id', info.page_id || ''); ph('token', info.token); }
+            if (canal === 'telegram') { ph('token', info.token); }
+            if (canal === 'linkedin') { set('correo', info.correo || ''); ph('password', info.password); }
+            if (info.mensaje) msg(card, info.mensaje, info.estado === 'ok' ? 'ok' : info.estado === 'error' ? 'error' : '');
+        });
+    }
+
+    app.querySelectorAll('.red-card[data-canal]').forEach(card => {
+        const canal = card.dataset.canal;
+        const datos = () => Object.fromEntries([...card.querySelectorAll('input[name]')].map(i => [i.name, i.value]));
+        const btns = () => card.querySelectorAll('button');
+        const ocupado = (b) => btns().forEach(x => x.disabled = b);
+
+        const g = card.querySelector('.red-guardar');
+        if (g) g.addEventListener('click', async () => {
+            ocupado(true); msg(card, 'Guardando…');
+            const r = await post(`/canales/${canal}/guardar`, datos());
+            ocupado(false);
+            if (!r.ok) { msg(card, r.error || 'No se pudo guardar', 'error'); return; }
+            card.querySelectorAll('input[type="password"]').forEach(i => i.value = '');
+            msg(card, 'Guardado. Ahora toca "' + (card.querySelector('.red-probar').textContent) + '".', 'ok');
+            cargar();
+        });
+
+        const p = card.querySelector('.red-probar');
+        if (p) p.addEventListener('click', async () => {
+            ocupado(true); msg(card, 'Probando…');
+            const r = await post(`/canales/${canal}/probar`);
+            ocupado(false);
+            msg(card, r.ok ? '✅ ' + r.mensaje : '❌ ' + (r.error || 'Falló la prueba'), r.ok ? 'ok' : 'error');
+            pintarEstado(card, { configurado: true, estado: r.ok ? 'ok' : 'error' });
+        });
+
+        const q = card.querySelector('.red-quitar');
+        if (q) q.addEventListener('click', async () => {
+            if (!confirm('¿Quitar la conexión de ' + card.querySelector('h3').textContent + ' para este cliente?')) return;
+            ocupado(true);
+            const r = await post(`/canales/${canal}/quitar`);
+            ocupado(false);
+            if (r.ok) { card.querySelectorAll('input').forEach(i => { i.value = ''; i.placeholder = ''; }); msg(card, 'Conexión quitada.'); cargar(); }
+            else msg(card, r.error || 'No se pudo quitar', 'error');
+        });
+    });
+
+    cargar();
+})();
+</script>
 {% endif %}
 {% endblock %}
