@@ -1601,7 +1601,10 @@ def canales_guardar(canal):
         elif canal == 'linkedin':
             if '@' not in v('correo'):
                 return jsonify({'ok': False, 'error': 'Escribe un correo válido'}), 400
-            _canales.guardar_canal(dom, 'linkedin', {'correo': v('correo')}, {'password': v('password').replace(' ', '')})
+            previo = (_canales.obtener_canal(dom, 'linkedin') or {}).get('datos') or {}
+            datos_li = dict(previo) if previo.get('correo') == v('correo') else {}   # mismo correo: conservar seguimiento
+            datos_li['correo'] = v('correo')
+            _canales.guardar_canal(dom, 'linkedin', datos_li, {'password': v('password').replace(' ', '')})
         else:
             return jsonify({'ok': False, 'error': 'Canal no disponible'}), 400
         return jsonify({'ok': True})
@@ -1635,6 +1638,94 @@ def canales_probar(canal):
             pass
         app.logger.warning(f"⚠️ canales_probar {canal} ({dom}): {e}")
         return jsonify({'ok': False, 'error': str(e)})
+
+# ---------- Bandeja de LinkedIn (solo lectura, desde los correos de aviso) ----------
+import linkedin_inbox
+
+def _asegurar_tabla_linkedin(config):
+    conn = get_db_connection(config)
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS linkedin_hilos (
+                numero VARCHAR(40) PRIMARY KEY,
+                hilo_url VARCHAR(500) NOT NULL,
+                perfil_url VARCHAR(500) NULL,
+                nombre VARCHAR(120) NULL,
+                titular VARCHAR(255) NULL,
+                actualizado DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) DEFAULT CHARSET=utf8mb4
+        """)
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
+
+def registrar_mensaje_linkedin(dominio, p):
+    """Crea/actualiza el chat de esa persona en el Kanban (IA apagada) y avisa al cel."""
+    config = config_por_dominio(dominio)
+    if not config:
+        raise RuntimeError(f"cliente {dominio} no encontrado")
+    numero = linkedin_inbox.numero_para_hilo(p['hilo_id'])
+
+    _asegurar_tabla_linkedin(config)
+    conn = get_db_connection(config)
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO linkedin_hilos (numero, hilo_url, perfil_url, nombre, titular)
+            VALUES (%s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE hilo_url=VALUES(hilo_url), perfil_url=VALUES(perfil_url),
+                                    nombre=VALUES(nombre), titular=VALUES(titular)
+        """, (numero, p['hilo_url'], p.get('perfil_url') or '', p['nombre'], p.get('titular') or ''))
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
+
+    inicializar_chat_meta(numero, config)
+    actualizar_info_contacto(numero, config, nombre_perfil=p['nombre'], plataforma='LinkedIn')
+
+    # LinkedIn: siempre lo contesta una persona, nunca la IA
+    try:
+        conn = get_db_connection(config)
+        cur = conn.cursor()
+        cur.execute("UPDATE contactos SET ia_activada = 0 WHERE numero_telefono = %s", (numero,))
+        conn.commit()
+        cur.close(); conn.close()
+    except Exception as e:
+        app.logger.warning(f"⚠️ LinkedIn: no se pudo apagar la IA de {numero}: {e}")
+    IA_ESTADOS[numero] = {'activa': False}
+
+    guardar_mensaje_inmediato(
+        numero,
+        "💼 Te escribió por LinkedIn. LinkedIn no comparte el texto del mensaje: tócalo en «Responder en LinkedIn» para leerlo y contestar.",
+        config=config, tipo_mensaje='texto', nombre_perfil=p['nombre'])
+
+    push_aviso_chat(config, numero, f"💼 {p['nombre']} te escribió en LinkedIn",
+                    p.get('titular') or 'Toca para abrir la conversación')
+    app.logger.info(f"💼 LinkedIn [{dominio}]: mensaje de {p['nombre']} → {numero}")
+
+@app.route('/linkedin/hilo/<numero>')
+@login_required
+def linkedin_hilo(numero):
+    if not numero.startswith('li_'):
+        return jsonify({'ok': False}), 404
+    config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT hilo_url, perfil_url, nombre, titular FROM linkedin_hilos WHERE numero = %s", (numero,))
+        r = cur.fetchone()
+        cur.close(); conn.close()
+        if not r:
+            return jsonify({'ok': False}), 404
+        return jsonify({'ok': True, **r})
+    except Exception as e:
+        app.logger.error(f"🔴 linkedin_hilo {numero}: {e}")
+        return jsonify({'ok': False}), 500
+
+linkedin_inbox.iniciar(registrar_mensaje_linkedin)
 
 @app.route('/canales/<canal>/quitar', methods=['POST'])
 @login_required
